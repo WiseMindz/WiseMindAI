@@ -4,8 +4,10 @@ Tar emot JSON från Pine Script v9.15+, sparar i DB, postar till Telegram.
 """
 
 import logging
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
+from typing import Optional
 from telegram import Bot
+from anthropic import Anthropic
 from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
@@ -25,18 +27,21 @@ telegram_bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 
 # ==================== PIP VALUE LOOKUP ====================
+# Pip-värde per standard-lot per symbol (i USD)
+# Detta används för lot size-beräkning
 PIP_VALUE_USD = {
-    "EURUSD": 10.0,
+    "EURUSD": 10.0,    # 1 lot = 100,000 EUR, 1 pip = $10
     "GBPUSD": 10.0,
     "AUDUSD": 10.0,
     "NZDUSD": 10.0,
     "USDCHF": 10.5,
     "USDJPY": 9.5,
     "USDCAD": 7.3,
-    "XAUUSD": 10.0,
+    "XAUUSD": 10.0,    # 1 lot = 100 oz, 1 pip ($0.10) = $10
     "XAGUSD": 50.0,
 }
 
+# Pip size (minsta prisrörelse) per symbol
 PIP_SIZE = {
     "EURUSD": 0.0001,
     "GBPUSD": 0.0001,
@@ -52,8 +57,9 @@ PIP_SIZE = {
 
 def get_pip_value(symbol: str) -> float:
     """Returnera pip-värde i USD per standard-lot."""
+    # Normalisera (ta bort suffix som .x, _, etc.)
     clean = symbol.upper().replace(".", "").replace("_", "")[:6]
-    return PIP_VALUE_USD.get(clean, 10.0)
+    return PIP_VALUE_USD.get(clean, 10.0)  # default $10/pip
 
 
 def get_pip_size(symbol: str) -> float:
@@ -63,7 +69,12 @@ def get_pip_size(symbol: str) -> float:
 
 
 def calculate_lot_size(symbol: str, entry: float, sl: float, balance: float, risk_pct: float) -> dict:
-    """Beräknar lot size baserat på account balance, risk %, och SL-distans."""
+    """
+    Beräknar lot size baserat på account balance, risk %, och SL-distans.
+
+    Returns:
+        dict med lot, risk_dollars, sl_pips, pip_value_used
+    """
     risk_dollars = balance * (risk_pct / 100.0)
     sl_distance_price = abs(entry - sl)
     pip_size = get_pip_size(symbol)
@@ -73,8 +84,9 @@ def calculate_lot_size(symbol: str, entry: float, sl: float, balance: float, ris
     if sl_pips == 0 or pip_value == 0:
         return {"lot": 0, "risk_dollars": risk_dollars, "sl_pips": 0, "pip_value": pip_value}
 
+    # Lot size = risk_dollars / (sl_pips × pip_value_per_lot)
     lot = risk_dollars / (sl_pips * pip_value)
-    lot = round(lot, 2)
+    lot = round(lot, 2)  # mikro-lot precision
 
     return {
         "lot": lot,
@@ -131,7 +143,7 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float) -> str
     return msg
 
 
-# ==================== WEBHOOK ENDPOINTS ====================
+# ==================== WEBHOOK ENDPOINT ====================
 @app.get("/")
 async def root():
     """Health check — visa att webhook lever."""
@@ -140,7 +152,28 @@ async def root():
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
-    """Tar emot TradingView alert som JSON."""
+    """
+    Tar emot TradingView alert som JSON.
+    Förväntat format (från Pine v9.15):
+    {
+        "secret": "wisemind2026",
+        "symbol": "EURUSD",
+        "side": "LONG",
+        "trade": "T1 (1st)",
+        "session": "London",
+        "profile": "EUR",
+        "entry": 1.16920,
+        "sl": 1.16860,
+        "sl_source": "engulf",
+        "tp": 1.17430,
+        "tp_source": "PDH",
+        "rr": 5.0,
+        "swept": "AL",
+        "after_manipulation": false,
+        "asia_wide": false,
+        "tf": "5m"
+    }
+    """
     try:
         data = await request.json()
         logger.info(f"Webhook received: {data.get('symbol')} {data.get('side')} {data.get('trade')}")
@@ -177,14 +210,12 @@ async def receive_webhook(request: Request):
         # Spara i databas
         try:
             note = f"{data.get('trade', '')} | {data.get('session', '')} | RR: {data.get('rr', 0)} | Lot: {lot_calc['lot']}"
-            import asyncio
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(save_trade(
+            await save_trade(
                 symbol=data["symbol"],
                 direction=data["side"].lower(),
                 entry=float(data["entry"]),
                 note=note,
-            ))
+            )
             logger.info("Trade saved to database")
         except Exception as e:
             logger.error(f"Failed to save trade: {e}")

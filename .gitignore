@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Logs
+*.log
+bot.log
+bot_error.log
+
+# Database
+trades.db
+
+# Environment
+.env
+
+# ngrok
+ngrok
+ngrok.zip
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
