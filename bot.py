@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import time
+import threading
+import uvicorn
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from anthropic import Anthropic
@@ -9,6 +11,7 @@ from config import (
     CLAUDE_API_KEY,
     CLAUDE_MODEL_FAST,
     CLAUDE_MODEL_SMART,
+    WEBHOOK_PORT,
 )
 from database import (
     init_db,
@@ -18,6 +21,7 @@ from database import (
     cleanup_old_messages,
 )
 from system_prompt import SYSTEM_PROMPT
+from webhook_handler import app as webhook_app
 
 # ==================== LOGGING SETUP ====================
 logging.basicConfig(
@@ -75,69 +79,42 @@ def strip_force_prefix(user_text: str) -> str:
     return user_text
 
 
-# ==================== KONVERSATIONSMINNE → CLAUDE FORMAT ====================
-
 def build_messages_for_claude(history: list, current_user_text: str, current_username: str) -> list:
-    """
-    Bygger Claude API messages-array från databas-historik + nuvarande fråga.
-
-    Claude API kräver alternerande user/assistant roles. Vi lägger till
-    avsändarens namn i text-prefix så Claude förstår vem som säger vad i gruppen.
-    """
     messages = []
     last_role = None
-
     for msg in history:
         role = msg["role"]
         username = msg["username"] or "okänd"
         text = msg["text"]
-
-        # Prefixera namn för user-meddelanden (assistent har inget namn-prefix)
         if role == "user":
             content = f"[{username}]: {text}"
         else:
             content = text
-
-        # Slå ihop konsekutiva meddelanden från samma roll (Claude API kräver alternering)
         if role == last_role and messages:
             messages[-1]["content"] += f"\n{content}"
         else:
             messages.append({"role": role, "content": content})
             last_role = role
-
-    # Lägg till nuvarande meddelande
     current_content = f"[{current_username}]: {current_user_text}"
     if last_role == "user" and messages:
         messages[-1]["content"] += f"\n{current_content}"
     else:
         messages.append({"role": "user", "content": current_content})
-
     return messages
 
 
 # ==================== CLAUDE RESPONSE ====================
 async def claude_response(user_text: str, chat_id: int, username: str):
-    """Call Claude API with conversation memory + smart routing."""
     try:
         model, reason = pick_model(user_text)
         clean_text = strip_force_prefix(user_text)
         max_tokens = 800 if model == CLAUDE_MODEL_FAST else 1500
-
-        # Hämta senaste 20 meddelanden för kontext
         history = await get_recent_messages(chat_id, limit=20)
-
-        # Hämta senaste trade som extra kontext
         last_trade = await get_last_trade()
         trade_context = f"\n\nSenaste trade i systemet: {last_trade}" if last_trade else ""
-
-        # Bygg system prompt med trade-kontext
         full_system = SYSTEM_PROMPT + trade_context
-
-        # Bygg messages-array med konversationshistorik
         messages = build_messages_for_claude(history, clean_text, username)
-
         logger.info(f"Routing → {model.split('-')[1].upper()} ({reason}) | history={len(history)} msgs | input_len={len(clean_text)}")
-
         start = time.time()
         response = claude.messages.create(
             model=model,
@@ -146,11 +123,9 @@ async def claude_response(user_text: str, chat_id: int, username: str):
             messages=messages,
         )
         elapsed = time.time() - start
-
         response_text = response.content[0].text
         logger.info(f"Claude response — {model.split('-')[1].upper()} | {elapsed:.1f}s | response_len={len(response_text)}")
         return response_text
-
     except Exception as e:
         logger.error(f"Claude API call failed: {type(e).__name__}: {e}")
         return "⚠️ Jag kunde inte hämta svar från Claude just nu. Försök igen om en stund."
@@ -167,7 +142,7 @@ async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         trade = await get_last_trade()
         if trade:
-            text = f"📊 *Senaste trade*\n{trade.get('symbol')} {trade.get('direction', '').upper()} @ {trade.get('entry')}"
+            text = f"📊 *Senaste trade*\n{trade.get('symbol')} {trade.get('direction', '').upper()} @ {trade.get('entry')}\n_{trade.get('note', '')}_"
         else:
             text = "📭 Inga trades än."
         await update.message.reply_text(text, parse_mode="Markdown")
@@ -177,7 +152,6 @@ async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Rensa konversationsminne för denna chat (bara senaste 100 sparas ändå)"""
     logger.info(f"/clearmemory from user {update.effective_user.id} in chat {update.effective_chat.id}")
     try:
         await cleanup_old_messages(update.effective_chat.id, keep_last=0)
@@ -188,41 +162,30 @@ async def cmd_clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Spara ALLA meddelanden, svara endast när taggad."""
     if not update.message or not update.message.text:
         return
-
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     username = update.effective_user.first_name or update.effective_user.username or "okänd"
     text = update.message.text
     text_lower = text.lower()
-
-    # SPARA ALLTID — boten ska se hela konversationen
     try:
         await save_message(chat_id, user_id, username, "user", text)
     except Exception as e:
         logger.error(f"Failed to save message: {e}")
-
-    # Svara bara om taggad
     if "@wisefx_bot" in text_lower or "wisemind" in text_lower:
         logger.info(f"Bot tagged by {username} ({user_id}) in chat {chat_id}: {text[:80]}")
         try:
             response = await claude_response(text, chat_id, username)
             await update.message.reply_text(response)
-
-            # Spara bot-svaret som en del av minnet
             try:
                 await save_message(chat_id, None, "WiseMind AI", "assistant", response)
             except Exception as e:
                 logger.error(f"Failed to save bot reply: {e}")
-
-            # Periodisk cleanup — behåll bara senaste 100 per chat
             try:
                 await cleanup_old_messages(chat_id, keep_last=100)
             except Exception as e:
                 logger.error(f"Cleanup failed: {e}")
-
             logger.info("Reply sent successfully")
         except Exception as e:
             logger.error(f"Failed to send reply: {e}")
@@ -232,9 +195,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 
-# ==================== ERROR HANDLER ====================
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
+
+
+# ==================== WEBHOOK SERVER (KÖR I BAKGRUND) ====================
+def start_webhook_server():
+    """Starta FastAPI webhook-servern i en separat thread."""
+    logger.info(f"Starting webhook server on port {WEBHOOK_PORT}")
+    uvicorn.run(
+        webhook_app,
+        host="0.0.0.0",
+        port=WEBHOOK_PORT,
+        log_level="warning",
+    )
 
 
 # ==================== START ====================
@@ -244,18 +218,22 @@ def main():
 
     try:
         loop.run_until_complete(init_db())
-        logger.info("Database initialized (with conversation memory)")
+        logger.info("Database initialized (with conversation memory + trades)")
 
+        # Starta webhook-server i bakgrundsthread
+        webhook_thread = threading.Thread(target=start_webhook_server, daemon=True)
+        webhook_thread.start()
+        logger.info(f"✅ Webhook listening on http://0.0.0.0:{WEBHOOK_PORT}/webhook")
+
+        # Starta Telegram-bot i huvudthread
         app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("last", cmd_last))
         app.add_handler(CommandHandler("clearmemory", cmd_clear_memory))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_error_handler(error_handler)
 
-        logger.info("WiseMind AI starting... (smart routing + conversation memory)")
-        logger.info("Bot is running and listening")
+        logger.info("WiseMind AI starting... (Telegram bot + Webhook receiver)")
         logger.info("Try: @Wisefx_bot hej")
 
         app.run_polling(drop_pending_updates=True)
@@ -266,3 +244,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
