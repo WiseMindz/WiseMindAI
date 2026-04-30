@@ -6,6 +6,7 @@ Tar emot JSON från Pine Script v9.15+, sparar i DB, postar till Telegram.
 import logging
 from fastapi import FastAPI, Request, HTTPException, Header
 from typing import Optional
+import re
 from telegram import Bot
 from anthropic import Anthropic
 from config import (
@@ -105,14 +106,85 @@ def calculate_tp_profit(symbol: str, entry: float, tp: float, lot: float) -> flo
     return round(tp_pips * pip_value * lot, 2)
 
 
+def parse_tradingview_alert(alert_text: str) -> dict:
+    """Försök extrahera trade-data från TradingView alert text."""
+    lines = [line.strip() for line in alert_text.splitlines() if line.strip()]
+    parsed = {}
+
+    if lines:
+        header = lines[0]
+        # exempel: EURUSD T1 (1st) [London] [EUR]
+        header_match = re.search(r"\b([A-Z]{3,6}(?:USD|EUR|JPY|GBP|CHF|AUD|CAD|NZD))\b", header)
+        if header_match:
+            parsed["symbol"] = header_match.group(1)
+
+        trade_match = re.search(r"\b(T\d+\s*\([^)]*\)|T\d+|\w+\s*\([^)]*\))\b", header)
+        if trade_match:
+            parsed["trade"] = trade_match.group(1)
+
+        session_match = re.search(r"\[([^\]]+)\]", header)
+        if session_match:
+            parsed["session"] = session_match.group(1)
+            rest = header[session_match.end():].strip()
+            profile_match = re.search(r"\[([^\]]+)\]", rest)
+            if profile_match:
+                parsed["profile"] = profile_match.group(1)
+
+    def extract_value(pattern, text):
+        match = re.search(pattern, text, re.IGNORECASE)
+        return match.group(1) if match else None
+
+    for line in lines:
+        if re.match(r"^Entry", line, re.IGNORECASE):
+            parsed["entry"] = float(extract_value(r"Entry\s*[:=]?\s*([0-9]+\.?[0-9]*)", line) or 0)
+        elif re.match(r"^SL", line, re.IGNORECASE):
+            parsed["sl"] = float(extract_value(r"SL\s*[:=]?\s*([0-9]+\.?[0-9]*)", line) or 0)
+            parsed["sl_source"] = extract_value(r"SL\s*[:=]?.*?\(([^)]+)\)", line) or ""
+        elif re.match(r"^TP", line, re.IGNORECASE):
+            parsed["tp"] = float(extract_value(r"TP\s*[:=]?\s*([0-9]+\.?[0-9]*)", line) or 0)
+            parsed["tp_source"] = extract_value(r"@([A-Za-z0-9_]+)", line) or ""
+            rr_value = extract_value(r"\(([0-9]+\.?[0-9]*)R\)", line)
+            if rr_value:
+                parsed["rr"] = float(rr_value)
+        elif re.match(r"^Lot", line, re.IGNORECASE):
+            parsed["lot"] = float(extract_value(r"Lot\s*[:=]?\s*([0-9]+\.?[0-9]*)", line) or 0)
+        elif re.match(r"^Swept", line, re.IGNORECASE):
+            parsed["swept"] = extract_value(r"Swept\s*[:=]?\s*(.+)$", line) or ""
+        elif re.search(r"asia", line, re.IGNORECASE):
+            parsed["asia_wide"] = True
+
+        if not parsed.get("side"):
+            side_match = re.search(r"\b(LONG|SHORT)\b", line, re.IGNORECASE)
+            if side_match:
+                parsed["side"] = side_match.group(1).upper()
+
+    # Fallbacks from inline text
+    if "symbol" not in parsed:
+        symbol_match = re.search(r"\b([A-Z]{3,6}(?:USD|EUR|JPY|GBP|CHF|AUD|CAD|NZD))\b", alert_text)
+        if symbol_match:
+            parsed["symbol"] = symbol_match.group(1)
+    if "side" not in parsed:
+        side_match = re.search(r"\b(LONG|SHORT)\b", alert_text, re.IGNORECASE)
+        if side_match:
+            parsed["side"] = side_match.group(1).upper()
+    if "entry" not in parsed or "sl" not in parsed or "tp" not in parsed:
+        for field in ["entry", "sl", "tp", "rr"]:
+            if field not in parsed:
+                value = extract_value(rf"\b{field}\b\s*[:=]?\s*([0-9]+\.?[0-9]*)", alert_text)
+                if value:
+                    parsed[field] = float(value)
+
+    return parsed
+
+
 # ==================== MESSAGE FORMATTING ====================
 def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float) -> str:
     """Bygger ett snyggt formatterat Telegram-meddelande från alert data."""
     side = data.get("side", "?").upper()
     arrow = "▲" if side == "LONG" else "▼"
     symbol = data.get("symbol", "?")
-    trade_type = data.get("trade", "?")
-    session = data.get("session", "?")
+    trade_type = data.get("trade", "")
+    session = data.get("session", "")
     profile = data.get("profile", "")
     entry = data.get("entry", 0)
     sl = data.get("sl", 0)
@@ -125,12 +197,28 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float) -> str
     asia_wide = data.get("asia_wide", False)
 
     profile_tag = f" [{profile}]" if profile else ""
+    session_tag = f" [{session}]" if session else ""
+    trade_tag = f" {trade_type}" if trade_type else ""
+    tp_source_tag = f" @{tp_src}" if tp_src else ""
+    sl_source_tag = f"{sl_src}" if sl_src else ""
+    sl_source_has_pips = "pips" in sl_src.lower()
+    rr_tag = f" ({rr}R)" if rr else ""
 
-    msg = f"<b>{arrow} {symbol} {trade_type} [{session}]{profile_tag}</b>\n"
+    msg = f"<b>{arrow} {symbol}{trade_tag}{session_tag}{profile_tag}</b>\n"
     msg += f"Entry: <b>{entry}</b>\n"
-    msg += f"SL: <b>{sl}</b> ({sl_src}, {lot_calc['sl_pips']} pips)\n"
-    msg += f"TP: <b>{tp}</b> @{tp_src} ({rr}R)\n"
-    msg += f"\n💰 <b>Lot: {lot_calc['lot']}</b> | Risk: ${lot_calc['risk_dollars']} | TP profit: ${tp_profit}\n"
+    msg += f"SL: <b>{sl}</b>"
+    if sl_source_tag or lot_calc.get("sl_pips"):
+        msg += " ("
+        if sl_source_tag:
+            msg += sl_source_tag
+            if lot_calc.get("sl_pips") and not sl_source_has_pips:
+                msg += ", "
+        if lot_calc.get("sl_pips") and not sl_source_has_pips:
+            msg += f"{lot_calc['sl_pips']} pips"
+        msg += ")"
+    msg += "\n"
+    msg += f"TP: <b>{tp}</b>{tp_source_tag}{rr_tag}\n\n"
+    msg += f"💰 Lot: <b>{lot_calc['lot']}</b> | Risk: ${lot_calc['risk_dollars']} | TP profit: ${tp_profit}\n"
 
     if swept:
         msg += f"Swept: {swept}\n"
@@ -176,6 +264,15 @@ async def receive_webhook(request: Request):
     """
     try:
         data = await request.json()
+
+        # Försök läsa in data från TradingView alert-message om vanliga fält saknas
+        if not all(field in data for field in ["symbol", "side", "entry", "sl", "tp"]):
+            alert_text = data.get("alert_message") or data.get("message") or data.get("text")
+            if isinstance(alert_text, str):
+                parsed = parse_tradingview_alert(alert_text)
+                logger.info(f"Parsed alert text into fields: {parsed}")
+                data = {**parsed, **data}
+
         logger.info(f"Webhook received: {data.get('symbol')} {data.get('side')} {data.get('trade')}")
 
         # Verifiera secret

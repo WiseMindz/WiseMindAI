@@ -18,6 +18,7 @@ En AI-driven trading-assistent som integrerar med TradingView webhooks, Telegram
 ## Deployment
 - Railway: Deploy från GitHub
 - Environment variables krävs för Railway
+- Railway använder `PORT` för att exponera din webhook-server
 
 ## API Keys Required
 - `CLAUDE_API_KEY` - Anthropic Claude
