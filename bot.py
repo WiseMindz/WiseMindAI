@@ -87,6 +87,36 @@ def strip_force_prefix(user_text: str) -> str:
     return user_text
 
 
+TONE_KEYWORDS = {
+    "frustrated": ["frustrerad", "stress", "stressad", "arg", "besviken", "trött", "rädd", "förtvivlad", "jävla", "fuck", "idiot", "misslyckad", "förlorad", "förlust", "suck"],
+    "overconfident": ["enkelt", "lätt", "given", "safe", "garanterat", "no risk", "maxade", "100%", "säker", "det här vinner", "oslagbar", "scoop", "take it"],
+    "fearful": ["oroar", "orolig", "rädd", "feg", "fomo", "ångest", "nervös", "stressad", "tvekar", "osäker"],
+    "revenge": ["revenge", "ta igen", "ta tillbaka", "hämd", "illska", "sätta tillbaka", "komma tillbaka", "make up"],
+    "high_risk": ["riskerar", "för mycket", "max risk", "stor lot", "lot size", "high risk", "överrisk", "överdrivet"],
+}
+
+
+TONE_INSTRUCTIONS = {
+    "frustrated": "The user is frustrated or burned out. Be calm, supportive, and process-focused. Reinforce discipline and help them refocus on the next correct step.",
+    "overconfident": "The user is overconfident. Push back gently, emphasize the system rules, and warn against taking unnecessary risk or impulsive trades.",
+    "fearful": "The user is fearful or uncertain. Offer clear guidance, reduce complexity, and remind them to trade only when the setup fits the rules.",
+    "revenge": "The user is showing revenge or ego-driven language. Challenge this behavior directly and remind them that revenge trading is the fastest way to lose.",
+    "high_risk": "The user is talking about high risk or large position size. Warn about risk limits and force them back to proper risk management.",
+    "neutral": "The user tone is neutral. Respond with clear, rational, and rule-based feedback.",
+}
+
+
+def detect_user_tone(user_text: str) -> tuple[str, str]:
+    text_lower = user_text.lower()
+    best_match = "neutral"
+    for tone, words in TONE_KEYWORDS.items():
+        for word in words:
+            if word in text_lower:
+                best_match = tone
+                return best_match, TONE_INSTRUCTIONS[tone]
+    return best_match, TONE_INSTRUCTIONS[best_match]
+
+
 def build_messages_for_claude(history: list, current_user_text: str, current_username: str) -> list:
     messages = []
     last_role = None
@@ -116,14 +146,16 @@ async def claude_response(user_text: str, chat_id: int, username: str):
     try:
         model, reason = pick_model(user_text)
         clean_text = strip_force_prefix(user_text)
+        tone_label, tone_description = detect_user_tone(clean_text)
         max_tokens = 800 if model == CLAUDE_MODEL_FAST else 1500
         history = await get_recent_messages(chat_id, limit=20)
         last_trade = await get_last_trade()
         alert_context = "\n\nTradingView alerts are integrated into this bot. Recent incoming signal alerts are stored and available as context for your analysis."
         trade_context = f"\n\nSenaste trade i systemet: {last_trade}" if last_trade else ""
-        full_system = SYSTEM_PROMPT + alert_context + trade_context
+        tone_context = f"\n\nUser tone: {tone_label}. {tone_description}"
+        full_system = SYSTEM_PROMPT + alert_context + trade_context + tone_context
         messages = build_messages_for_claude(history, clean_text, username)
-        logger.info(f"Routing → {model.split('-')[1].upper()} ({reason}) | history={len(history)} msgs | input_len={len(clean_text)}")
+        logger.info(f"Routing → {model.split('-')[1].upper()} ({reason}) | tone={tone_label} | history={len(history)} msgs | input_len={len(clean_text)}")
         start = time.time()
         response = claude.messages.create(
             model=model,
