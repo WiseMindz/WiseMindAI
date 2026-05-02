@@ -18,6 +18,7 @@ from config import (
     ACCOUNT_RISK_PERCENT,
 )
 from database import save_trade, save_message
+from bot import evaluate_signal
 
 logger = logging.getLogger(__name__)
 
@@ -305,13 +306,18 @@ async def receive_webhook(request: Request):
             lot=lot_calc["lot"],
         )
 
+        # Evaluera signalen mot WiseMind-regler
+        signal_evaluation = evaluate_signal(data)
+        evaluation_text = f"\n\n🧠 **Signal Evaluation:** {signal_evaluation['explanation']}"
+
         # Spara i databas
         try:
             note = (
                 f"{data.get('trade', '')} | {data.get('session', '')} | RR:{data.get('rr', 0)} | Lot:{lot_calc['lot']} | "
                 f"Swept:{data.get('swept', 'MISSING')} | Displacement:{data.get('displacement', 'unknown')} | "
                 f"PD:{data.get('pd_zone', 'unknown')} | AsiaWide:{data.get('asia_wide', False)} | "
-                f"AfterManip:{data.get('after_manipulation', False)} | TF:{data.get('tf', '')}"
+                f"AfterManip:{data.get('after_manipulation', False)} | TF:{data.get('tf', '')} | "
+                f"Rating:{signal_evaluation['rating']} | Score:{signal_evaluation['score']}/10"
             )
             await save_trade(
                 symbol=data["symbol"],
@@ -324,7 +330,7 @@ async def receive_webhook(request: Request):
             logger.error(f"Failed to save trade: {e}")
 
         # Bygg Telegram-meddelande
-        msg = format_telegram_message(data, lot_calc, tp_profit)
+        msg = format_telegram_message(data, lot_calc, tp_profit) + evaluation_text
 
         # Posta till Telegram-gruppen
         try:

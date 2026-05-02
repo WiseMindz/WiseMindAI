@@ -182,6 +182,166 @@ def detect_trade_patterns(trades: list[dict]) -> str:
     return " ".join(patterns)
 
 
+def evaluate_signal(signal_data: dict) -> dict:
+    """
+    Evaluerar en signal mot WiseMind-regler och ger score/rating.
+
+    Args:
+        signal_data: dict med signalinformation (från webhook, OCR, etc.)
+
+    Returns:
+        dict med score (0-10), rating (A+/B/C), förklaring
+    """
+    score = 0
+    reasons = []
+
+    # 1. Sweep (2 poäng)
+    swept = signal_data.get("swept", "").strip().upper()
+    if swept and swept not in ["MISSING", "NO", "NONE", ""]:
+        score += 2
+        reasons.append("Sweep: ✓")
+    else:
+        reasons.append("Sweep: ✗ (Saknas)")
+
+    # 2. Displacement (2 poäng)
+    displacement = signal_data.get("displacement", "").strip().lower()
+    if displacement in ["yes", "true", "1"]:
+        score += 2
+        reasons.append("Displacement: ✓")
+    else:
+        reasons.append("Displacement: ✗ (Saknas)")
+
+    # 3. PD-zone touch (2 poäng)
+    pd_zone = signal_data.get("pd_zone", "").strip().upper()
+    if pd_zone and pd_zone not in ["MISSING", "NO", "NONE", ""]:
+        score += 2
+        reasons.append("PD-zone touch: ✓")
+    else:
+        reasons.append("PD-zone touch: ✗ (Saknas)")
+
+    # 4. Engulfing (2 poäng)
+    engulfing = signal_data.get("engulfing", "").strip().lower()
+    if engulfing in ["yes", "true", "1"]:
+        score += 2
+        reasons.append("Engulfing: ✓")
+    else:
+        reasons.append("Engulfing: ✗ (Saknas)")
+
+    # 5. Session-regler (2 poäng)
+    session = signal_data.get("session", "").strip().lower()
+    tf = signal_data.get("tf", "").strip().lower()
+    valid_sessions = ["london", "ny", "asia"]
+    valid_tf = ["5m", "1m"]
+    if session in valid_sessions and tf in valid_tf:
+        score += 2
+        reasons.append("Session/TF: ✓")
+    else:
+        reasons.append("Session/TF: ✗ (Ogiltig session eller TF)")
+
+    # Bonus: RR (1 poäng, max total 10)
+    rr = signal_data.get("rr", 0)
+    if rr >= 3:
+        score += min(1, 10 - score)  # Max 10 total
+        reasons.append("RR: ✓ (≥3:1)")
+    elif rr >= 2:
+        score += min(0.5, 10 - score)
+        reasons.append("RR: ~ (≥2:1)")
+    else:
+        reasons.append("RR: ✗ (<2:1)")
+
+    # Rating baserat på score
+    if score >= 8:
+        rating = "A+"
+    elif score >= 6:
+        rating = "B"
+    else:
+        rating = "C"
+
+    explanation = f"Score: {score}/10 ({rating}). " + " | ".join(reasons)
+
+    return {
+        "score": score,
+        "rating": rating,
+        "explanation": explanation
+    }
+
+
+def extract_signal_data_from_text(text: str) -> dict:
+    """
+    Försöker extrahera signaldata från fri text (OCR eller användarinput).
+
+    Args:
+        text: fri text att analysera
+
+    Returns:
+        dict med extraherade signaldata
+    """
+    data = {}
+    text_lower = text.lower()
+
+    # Symbol
+    import re
+    symbol_match = re.search(r'\b([a-z]{3,6}(?:usd|eur|jpy|gbp|chf|aud|cad|nzd))\b', text_lower)
+    if symbol_match:
+        data["symbol"] = symbol_match.group(1).upper()
+
+    # Side
+    if "long" in text_lower:
+        data["side"] = "LONG"
+    elif "short" in text_lower:
+        data["side"] = "SHORT"
+
+    # Entry/SL/TP
+    entry_match = re.search(r'entry[:=]?\s*([0-9]+\.?[0-9]*)', text_lower)
+    if entry_match:
+        data["entry"] = float(entry_match.group(1))
+
+    sl_match = re.search(r'sl[:=]?\s*([0-9]+\.?[0-9]*)', text_lower)
+    if sl_match:
+        data["sl"] = float(sl_match.group(1))
+
+    tp_match = re.search(r'tp[:=]?\s*([0-9]+\.?[0-9]*)', text_lower)
+    if tp_match:
+        data["tp"] = float(tp_match.group(1))
+
+    # RR
+    rr_match = re.search(r'rr[:=]?\s*([0-9]+\.?[0-9]*)', text_lower)
+    if rr_match:
+        data["rr"] = float(rr_match.group(1))
+
+    # Swept
+    if "swept" in text_lower or "sweep" in text_lower:
+        data["swept"] = "YES"
+
+    # Displacement
+    if "displacement" in text_lower or "atr" in text_lower:
+        data["displacement"] = "yes"
+
+    # PD zone
+    if "pd" in text_lower or "fvg" in text_lower or "ob" in text_lower:
+        data["pd_zone"] = "YES"
+
+    # Engulfing
+    if "engulf" in text_lower:
+        data["engulfing"] = "yes"
+
+    # Session
+    if "london" in text_lower:
+        data["session"] = "London"
+    elif "ny" in text_lower or "new york" in text_lower:
+        data["session"] = "NY"
+    elif "asia" in text_lower:
+        data["session"] = "Asia"
+
+    # TF
+    if "5m" in text_lower:
+        data["tf"] = "5m"
+    elif "1m" in text_lower:
+        data["tf"] = "1m"
+
+    return data
+
+
 def build_messages_for_claude(history: list, current_user_text: str, current_username: str) -> list:
     messages = []
     last_role = None
@@ -286,8 +446,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Failed to save message: {e}")
     if "@wisefx_bot" in text_lower or "wisemind" in text_lower:
         logger.info(f"Bot tagged by {username} ({user_id}) in chat {chat_id}: {text[:80]}")
+
+        # Försök extrahera och evaluera signal från användartext
+        signal_evaluation = None
+        signal_data = extract_signal_data_from_text(text)
+        if signal_data:
+            signal_evaluation = evaluate_signal(signal_data)
+            logger.info(f"Signal evaluation from user text: {signal_evaluation}")
+
         try:
-            response = await claude_response(text, chat_id, username)
+            # Modifiera text för Claude om vi har signaldata
+            claude_text = text
+            if signal_evaluation:
+                claude_text += f"\n\n[Signal Evaluation: {signal_evaluation['explanation']}]"
+
+            response = await claude_response(claude_text, chat_id, username)
             await update.message.reply_text(response)
             try:
                 await save_message(chat_id, None, "WiseMind AI", "assistant", response)
@@ -352,6 +525,14 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if extracted_text:
             await save_message(chat_id, user_id, username, "user", f"Extracted text from {filename}:\n{extracted_text}")
 
+        # Försök extrahera och evaluera signal från extracted text
+        signal_evaluation = None
+        if extracted_text:
+            signal_data = extract_signal_data_from_text(extracted_text)
+            if signal_data:
+                signal_evaluation = evaluate_signal(signal_data)
+                logger.info(f"Signal evaluation from screenshot: {signal_evaluation}")
+
         if extracted_text:
             prompt = (
                 "User uploaded a screenshot or trade file and wants feedback on the setup. "
@@ -360,6 +541,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             if caption_text:
                 prompt += f"\n\nImage caption:\n{caption_text}"
+            if signal_evaluation:
+                prompt += f"\n\nSignal Evaluation: {signal_evaluation['explanation']}"
         else:
             prompt = (
                 "User uploaded a screenshot or trade file but no text could be extracted automatically. "
