@@ -18,7 +18,7 @@ from config import (
     ACCOUNT_RISK_PERCENT,
 )
 from database import save_trade, save_message
-from bot import evaluate_signal
+from signal_utils import evaluate_signal
 
 logger = logging.getLogger(__name__)
 
