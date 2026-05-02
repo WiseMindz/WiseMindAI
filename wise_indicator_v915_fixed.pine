@@ -1,0 +1,60 @@
+//@version=5
+indicator("Wise Indicator v9.15", shorttitle="Wise Indicator", overlay=true, max_boxes_count=500, max_lines_count=300, max_labels_count=500)
+
+// =============================================================================
+// Wise Indicator v9.15 — JSON WEBHOOK ALERTS
+// =============================================================================
+// This fixed version contains only one indicator() declaration.
+// Use it in TradingView with alert message set to {{alert_message}}.
+// =============================================================================
+
+groupWebhook = "◆ Webhook JSON Alerts (v9.15)"
+enableJsonAlerts = input.bool(true, "Send JSON to webhook", group=groupWebhook)
+webhookSecret = input.string("wisemind2026", "Webhook secret (must match .env)", group=groupWebhook)
+
+// Simple example signal logic for demonstration. Replace with your real strategy logic.
+fastEma = ta.ema(close, 9)
+slowEma = ta.ema(close, 21)
+longSignal = ta.crossover(fastEma, slowEma)
+shortSignal = ta.crossunder(fastEma, slowEma)
+
+plot(fastEma, color=color.new(color.green, 0), title="Fast EMA")
+plot(slowEma, color=color.new(color.red, 0), title="Slow EMA")
+
+entryPrice = close
+slPrice = longSignal ? entryPrice * 0.995 : shortSignal ? entryPrice * 1.005 : na
+
+tpPrice = longSignal ? entryPrice * 1.01 : shortSignal ? entryPrice * 0.99 : na
+
+rrValue = na
+if not na(slPrice) and not na(tpPrice)
+    rrValue := math.abs((tpPrice - entryPrice) / (entryPrice - slPrice))
+
+makeJsonPayload(side, entry, sl, tp, rr) =>
+    '{"secret":"' + webhookSecret + '",' +
+    '"symbol":"' + syminfo.tickerid + '",' +
+    '"side":"' + side + '",' +
+    '"trade":"WiseMind Signal",' +
+    '"session":"Asia/Europe/US",' +
+    '"profile":"Default",' +
+    '"entry":' + str.tostring(entry, format.price) + ',' +
+    '"sl":' + str.tostring(sl, format.price) + ',' +
+    '"sl_source":"calc",' +
+    '"tp":' + str.tostring(tp, format.price) + ',' +
+    '"tp_source":"calc",' +
+    '"rr":' + str.tostring(rr, format.precision, 2) + ',' +
+    '"swept":false,' +
+    '"after_manipulation":false,' +
+    '"asia_wide":false,' +
+    '"tf":"' + timeframe.period + '"}'
+
+if enableJsonAlerts
+    if longSignal
+        alert(makeJsonPayload("long", entryPrice, slPrice, tpPrice, rrValue), alert.freq_once_per_bar_close)
+    if shortSignal
+        alert(makeJsonPayload("short", entryPrice, slPrice, tpPrice, rrValue), alert.freq_once_per_bar_close)
+
+if longSignal
+    label.new(bar_index, low, "LONG", color=color.new(color.green, 0), style=label.style_label_up, textcolor=color.white)
+if shortSignal
+    label.new(bar_index, high, "SHORT", color=color.new(color.red, 0), style=label.style_label_down, textcolor=color.white)

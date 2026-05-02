@@ -3,6 +3,7 @@ Webhook handler för TradingView-alerts.
 Tar emot JSON från Pine Script v9.15+, sparar i DB, postar till Telegram.
 """
 
+import json
 import logging
 from fastapi import FastAPI, Request, HTTPException, Header
 from typing import Optional
@@ -16,7 +17,7 @@ from config import (
     ACCOUNT_BALANCE,
     ACCOUNT_RISK_PERCENT,
 )
-from database import save_trade
+from database import save_trade, save_message
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +329,17 @@ async def receive_webhook(request: Request):
                 parse_mode="HTML",
             )
             logger.info("Posted to Telegram")
+            alert_summary = (
+                f"TradingView alert received: {data.get('symbol')} {data.get('side')} {data.get('trade')} "
+                f"entry={data.get('entry')} sl={data.get('sl')} tp={data.get('tp')} rr={data.get('rr')} tf={data.get('tf')}"
+            )
+            await save_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                user_id=None,
+                username="TradingView",
+                role="system",
+                text=alert_summary,
+            )
         except Exception as e:
             logger.error(f"Failed to post to Telegram: {e}")
             raise HTTPException(status_code=500, detail=f"Telegram error: {e}")
