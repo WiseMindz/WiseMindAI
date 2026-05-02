@@ -20,6 +20,14 @@ from database import (
     get_recent_messages,
     cleanup_old_messages,
 )
+from media_utils import (
+    download_telegram_file,
+    extract_text_from_image,
+    extract_text_from_document,
+    is_image_file,
+    is_text_file,
+    sanitize_filename,
+)
 from system_prompt import SYSTEM_PROMPT
 from webhook_handler import app as webhook_app
 
@@ -196,6 +204,73 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    username = update.effective_user.first_name or update.effective_user.username or "okänd"
+    message = update.message
+    file_obj = None
+    filename = None
+    mime_type = None
+
+    if message.photo:
+        file_obj = await message.photo[-1].get_file()
+        filename = f"{username}_photo_{message.photo[-1].file_unique_id}.jpg"
+        mime_type = "image/jpeg"
+    elif message.document:
+        document = message.document
+        file_obj = await document.get_file()
+        filename = document.file_name or f"{username}_document"
+        mime_type = document.mime_type
+    else:
+        return
+
+    if not file_obj or not filename:
+        return
+
+    filename = sanitize_filename(filename)
+
+    try:
+        local_path = await download_telegram_file(file_obj, filename)
+        extracted_text = ""
+        if is_image_file(filename, mime_type):
+            extracted_text = extract_text_from_image(local_path)
+        elif is_text_file(filename, mime_type):
+            extracted_text = extract_text_from_document(local_path)
+
+        await save_message(chat_id, user_id, username, "user", f"Uploaded file: {filename}")
+        if extracted_text:
+            await save_message(chat_id, user_id, username, "user", f"Extracted text from {filename}:\n{extracted_text}")
+
+        if extracted_text:
+            prompt = (
+                "User uploaded a screenshot or trade file and wants feedback on the setup. "
+                "Use the extracted trade details and analyze the entry, SL, TP, risk management, and whether the setup matches WiseMind rules.\n\n"
+                f"Extracted content:\n{extracted_text}"
+            )
+        else:
+            prompt = (
+                "User uploaded a screenshot or trade file but no text could be extracted automatically. "
+                "Please ask for the exact trade details or give general guidance on how to review a trade screenshot for sweep, displacement, PD zone, engulfing, and risk management."
+            )
+
+        response = await claude_response(prompt, chat_id, username)
+        await update.message.reply_text(response)
+        await save_message(chat_id, None, "WiseMind AI", "assistant", response)
+        try:
+            await cleanup_old_messages(chat_id, keep_last=100)
+        except Exception as e:
+            logger.error(f"Cleanup failed: {e}")
+    except Exception as e:
+        logger.error(f"Failed to process media upload: {e}")
+        await update.message.reply_text(
+            "⚠️ Kunde inte processa filen just nu. Skicka en tydlig screenshot eller exportera tradeinformationen som text."
+        )
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
 
@@ -231,6 +306,7 @@ def main():
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("last", cmd_last))
         app.add_handler(CommandHandler("clearmemory", cmd_clear_memory))
+        app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_error_handler(error_handler)
 
