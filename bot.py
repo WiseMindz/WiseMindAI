@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import threading
+from datetime import datetime
 import uvicorn
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -16,6 +17,7 @@ from config import (
 from database import (
     init_db,
     get_last_trade,
+    get_recent_trades,
     save_message,
     get_recent_messages,
     cleanup_old_messages,
@@ -117,6 +119,69 @@ def detect_user_tone(user_text: str) -> tuple[str, str]:
     return best_match, TONE_INSTRUCTIONS[best_match]
 
 
+def parse_trade_note(note: str) -> dict:
+    fields = {}
+    if not note:
+        return fields
+    for part in note.split("|"):
+        part = part.strip()
+        if ":" in part:
+            key, value = part.split(":", 1)
+            fields[key.strip().lower()] = value.strip()
+        else:
+            fields.setdefault("tags", []).append(part)
+    return fields
+
+
+def detect_trade_patterns(trades: list[dict]) -> str:
+    if not trades:
+        return ""
+
+    repeated_sweep_missing = 0
+    total_trades = len(trades)
+    lot_values = []
+    time_stamps = []
+    sweep_miss_trades = []
+
+    for trade in trades:
+        note = trade.get("note", "")
+        parsed = parse_trade_note(note)
+        lot = parsed.get("lot")
+        if lot:
+            try:
+                lot_values.append(float(lot))
+            except ValueError:
+                pass
+        swept = parsed.get("swept", "").upper()
+        if swept in ["MISSING", "NO", "NONE", ""]:
+            repeated_sweep_missing += 1
+            sweep_miss_trades.append(trade)
+        timestamp = trade.get("timestamp")
+        if timestamp:
+            try:
+                time_stamps.append(datetime.fromisoformat(timestamp))
+            except Exception:
+                pass
+
+    patterns = []
+    if repeated_sweep_missing >= 3:
+        patterns.append("Det här liknar dina senaste 3 trades där du inte hade sweep.")
+
+    if len(trade_timestamps := sorted(time_stamps, reverse=True)) >= 3:
+        now = trade_timestamps[0]
+        within_24h = sum(1 for ts in trade_timestamps if (now - ts).total_seconds() <= 86400)
+        if within_24h >= 3:
+            patterns.append("Du har tagit många trades på kort tid. Det kan vara överhandel.")
+
+    if lot_values:
+        avg_lot = sum(lot_values) / len(lot_values)
+        latest_lot = lot_values[0]
+        if avg_lot > 0 and latest_lot > avg_lot * 2:
+            patterns.append("Din senaste lot size avviker kraftigt från din norm. Kontrollera riskhanteringen.")
+
+    return " ".join(patterns)
+
+
 def build_messages_for_claude(history: list, current_user_text: str, current_username: str) -> list:
     messages = []
     last_role = None
@@ -150,10 +215,15 @@ async def claude_response(user_text: str, chat_id: int, username: str):
         max_tokens = 800 if model == CLAUDE_MODEL_FAST else 1500
         history = await get_recent_messages(chat_id, limit=20)
         last_trade = await get_last_trade()
+        recent_trades = await get_recent_trades(limit=10)
+        trade_history_context = ""
+        history_patterns = detect_trade_patterns(recent_trades)
+        if history_patterns:
+            trade_history_context = f"\n\nTrade history insight: {history_patterns}"
         alert_context = "\n\nTradingView alerts are integrated into this bot. Recent incoming signal alerts are stored and available as context for your analysis."
         trade_context = f"\n\nSenaste trade i systemet: {last_trade}" if last_trade else ""
         tone_context = f"\n\nUser tone: {tone_label}. {tone_description}"
-        full_system = SYSTEM_PROMPT + alert_context + trade_context + tone_context
+        full_system = SYSTEM_PROMPT + alert_context + trade_context + tone_context + trade_history_context
         messages = build_messages_for_claude(history, clean_text, username)
         logger.info(f"Routing → {model.split('-')[1].upper()} ({reason}) | tone={tone_label} | history={len(history)} msgs | input_len={len(clean_text)}")
         start = time.time()

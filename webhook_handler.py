@@ -307,7 +307,12 @@ async def receive_webhook(request: Request):
 
         # Spara i databas
         try:
-            note = f"{data.get('trade', '')} | {data.get('session', '')} | RR: {data.get('rr', 0)} | Lot: {lot_calc['lot']}"
+            note = (
+                f"{data.get('trade', '')} | {data.get('session', '')} | RR:{data.get('rr', 0)} | Lot:{lot_calc['lot']} | "
+                f"Swept:{data.get('swept', 'MISSING')} | Displacement:{data.get('displacement', 'unknown')} | "
+                f"PD:{data.get('pd_zone', 'unknown')} | AsiaWide:{data.get('asia_wide', False)} | "
+                f"AfterManip:{data.get('after_manipulation', False)} | TF:{data.get('tf', '')}"
+            )
             await save_trade(
                 symbol=data["symbol"],
                 direction=data["side"].lower(),

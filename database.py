@@ -60,6 +60,13 @@ async def get_last_trade():
             return dict(zip([c[0] for c in cursor.description], row)) if row else None
 
 
+async def get_recent_trades(limit: int = 10):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+
+
 # ==================== KONVERSATIONSMINNE (NYTT) ====================
 
 async def save_message(chat_id: int, user_id: Optional[int], username: Optional[str], role: str, text: str):
