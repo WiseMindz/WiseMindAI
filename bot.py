@@ -231,6 +231,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not file_obj or not filename:
         return
 
+    caption_text = message.caption or ""
     filename = sanitize_filename(filename)
 
     try:
@@ -241,7 +242,11 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif is_text_file(filename, mime_type):
             extracted_text = extract_text_from_document(local_path)
 
-        await save_message(chat_id, user_id, username, "user", f"Uploaded file: {filename}")
+        if caption_text:
+            await save_message(chat_id, user_id, username, "user", f"Uploaded file: {filename} with caption: {caption_text}")
+        else:
+            await save_message(chat_id, user_id, username, "user", f"Uploaded file: {filename}")
+
         if extracted_text:
             await save_message(chat_id, user_id, username, "user", f"Extracted text from {filename}:\n{extracted_text}")
 
@@ -251,11 +256,16 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Use the extracted trade details and analyze the entry, SL, TP, risk management, and whether the setup matches WiseMind rules.\n\n"
                 f"Extracted content:\n{extracted_text}"
             )
+            if caption_text:
+                prompt += f"\n\nImage caption:\n{caption_text}"
         else:
             prompt = (
                 "User uploaded a screenshot or trade file but no text could be extracted automatically. "
-                "Please ask for the exact trade details or give general guidance on how to review a trade screenshot for sweep, displacement, PD zone, engulfing, and risk management."
+                "If there is a caption or description, use it to help infer the trade setup. "
+                "Otherwise ask for the exact trade details and suggest what to include: pair, timeframe, session, levels, entry, SL, TP, risk %.\n\n"
             )
+            if caption_text:
+                prompt += f"Caption:\n{caption_text}"
 
         response = await claude_response(prompt, chat_id, username)
         await update.message.reply_text(response)
