@@ -6,4 +6,4 @@ httpx==0.27.0
 python-dotenv==1.0.1
 aiosqlite==0.20.0
 pillow==10.0.0
-pytesseract==0.3.11
+pytesseract==0.3.13

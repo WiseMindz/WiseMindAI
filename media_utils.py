@@ -2,7 +2,11 @@ from pathlib import Path
 from typing import Optional
 
 from PIL import Image
-import pytesseract
+
+try:
+    import pytesseract
+except ImportError:
+    pytesseract = None
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,11 +44,14 @@ async def download_telegram_file(file, filename: str) -> Path:
 
 
 def extract_text_from_image(image_path: Path) -> str:
+    if pytesseract is None:
+        return ""
+
     try:
         image = Image.open(image_path)
         text = pytesseract.image_to_string(image, lang="eng")
         return text.strip()
-    except Exception:
+    except (pytesseract.TesseractNotFoundError, Exception):
         return ""
 
 
