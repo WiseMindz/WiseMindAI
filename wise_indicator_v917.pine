@@ -1,14 +1,14 @@
 //@version=5
-indicator("Wise Indicator v9.15", shorttitle="Wise Indicator", overlay=true, max_boxes_count=500, max_lines_count=300, max_labels_count=500)
+indicator("Wise Indicator v9.17", shorttitle="Wise Indicator", overlay=true, max_boxes_count=500, max_lines_count=300, max_labels_count=500)
 
 // =============================================================================
-// Wise Indicator v9.15 — JSON WEBHOOK ALERTS
+// Wise Indicator v9.17 — JSON WEBHOOK ALERTS
 // =============================================================================
 // This fixed version contains only one indicator() declaration.
 // Use it in TradingView with alert message set to {{alert_message}}.
 // =============================================================================
 
-groupWebhook = "◆ Webhook JSON Alerts (v9.15)"
+groupWebhook = "◆ Webhook JSON Alerts (v9.17)"
 enableJsonAlerts = input.bool(true, "Send JSON to webhook", group=groupWebhook)
 webhookSecret = input.string("wisemind2026", "Webhook secret (must match .env)", group=groupWebhook)
 

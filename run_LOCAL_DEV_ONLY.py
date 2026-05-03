@@ -1,3 +1,8 @@
+# WARNING: LOCAL DEV ONLY
+# This script is only intended for local development.
+# Do not run this file in production or on Railway.
+# It watches .py file changes and restarts bot.py automatically.
+
 import subprocess
 import time
 import sys
@@ -9,7 +14,7 @@ class RestartHandler(FileSystemEventHandler):
         self.process = None
 
     def on_modified(self, event):
-        if event.src_path.endswith(('.py')) and not event.src_path.endswith('run.py'):
+        if event.src_path.endswith((".py",)) and not event.src_path.endswith('run.py'):
             print(f"\n🔄 Fil ändrad: {event.src_path} → Startar om botten...")
             self.restart_bot()
 
@@ -20,6 +25,7 @@ class RestartHandler(FileSystemEventHandler):
         
         print("🚀 Startar ny bot...")
         self.process = subprocess.Popen([sys.executable, "bot.py"])
+
 
 def main():
     event_handler = RestartHandler()
@@ -33,7 +39,7 @@ def main():
     print("   → Tryck Ctrl+C för att stoppa allt")
     print("="*60)
 
-    event_handler.restart_bot()  # Starta botten första gången
+    event_handler.restart_bot()
 
     try:
         while True:
