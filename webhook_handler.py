@@ -301,14 +301,27 @@ async def receive_webhook(request: Request):
 
         msg = format_telegram_message(data, lot_calc, tp_profit, evaluation)
 
+        # Broadcast to private + public groups
+        BROADCAST_TARGETS = [TELEGRAM_CHAT_ID, -5179097995]
+        BROADCAST_TARGETS = list(dict.fromkeys(BROADCAST_TARGETS))  # dedupe
+
+        post_results = []
+        for target_chat_id in BROADCAST_TARGETS:
+            try:
+                await telegram_bot.send_message(
+                    chat_id=target_chat_id,
+                    text=msg,
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                )
+                post_results.append({"chat_id": target_chat_id, "status": "ok"})
+                logger.info(f"Posted to Telegram chat_id={target_chat_id}")
+            except Exception as e:
+                post_results.append({"chat_id": target_chat_id, "status": f"error: {e}"})
+                logger.error(f"Failed to post to chat_id={target_chat_id}: {e}")
+
+        # Save alert to PRIMARY chat memory only (Claude context)
         try:
-            await telegram_bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=msg,
-                parse_mode="HTML",
-                disable_web_page_preview=False,
-            )
-            logger.info("Posted to Telegram")
             alert_summary = (
                 f"TradingView alert received: {data.get('symbol')} {data.get('side')} {data.get('trade')} "
                 f"entry={data.get('entry')} sl={data.get('sl')} tp={data.get('tp')} rr={data.get('rr')} "
@@ -322,8 +335,11 @@ async def receive_webhook(request: Request):
                 text=alert_summary,
             )
         except Exception as e:
-            logger.error(f"Failed to post to Telegram: {e}")
-            raise HTTPException(status_code=500, detail=f"Telegram error: {e}")
+            logger.error(f"Failed to save alert summary: {e}")
+
+        # If ALL chats failed, escalate
+        if all(r["status"].startswith("error") for r in post_results):
+            raise HTTPException(status_code=500, detail=f"All Telegram broadcasts failed: {post_results}")
 
         return {
             "status": "ok",
@@ -343,14 +359,20 @@ async def receive_webhook(request: Request):
 
 @app.post("/test")
 async def test_endpoint():
-    """Test-endpoint för att verifiera att Telegram funkar."""
-    try:
-        await telegram_bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text="✅ <b>Webhook test</b>\nWiseMind webhook receiver fungerar (v9.17)!",
-            parse_mode="HTML",
-        )
-        return {"status": "Test message sent"}
-    except Exception as e:
-        logger.error(f"Test failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Test-endpoint för att verifiera Telegram broadcast i ALLA grupper."""
+    BROADCAST_TARGETS = [TELEGRAM_CHAT_ID, -5179097995]
+    BROADCAST_TARGETS = list(dict.fromkeys(BROADCAST_TARGETS))
+
+    results = []
+    for target_chat_id in BROADCAST_TARGETS:
+        try:
+            await telegram_bot.send_message(
+                chat_id=target_chat_id,
+                text=f"✅ <b>Webhook test</b>\nWiseMind webhook receiver fungerar (v9.17)!\nThis chat_id: <code>{target_chat_id}</code>",
+                parse_mode="HTML",
+            )
+            results.append({"chat_id": target_chat_id, "status": "ok"})
+        except Exception as e:
+            results.append({"chat_id": target_chat_id, "status": f"error: {e}"})
+            logger.error(f"Test failed for chat_id={target_chat_id}: {e}")
+    return {"status": "Test broadcast complete", "results": results}
