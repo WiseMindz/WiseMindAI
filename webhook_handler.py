@@ -1,15 +1,16 @@
 """
 Webhook handler för TradingView-alerts.
-Tar emot JSON från Pine Script v9.15+, sparar i DB, postar till Telegram.
+Tar emot JSON från Pine Script v9.17+, sparar i DB, postar till Telegram.
+
+v9.17 schema includes deep signal data fields:
+- displacement_atr, engulf_body_pct, vol_spike, htf_aligned
 """
 
-import json
 import logging
-from fastapi import FastAPI, Request, HTTPException, Header
+from fastapi import FastAPI, Request, HTTPException
 from typing import Optional
 import re
 from telegram import Bot
-from anthropic import Anthropic
 from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
@@ -30,54 +31,30 @@ telegram_bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 
 # ==================== PIP VALUE LOOKUP ====================
-# Pip-värde per standard-lot per symbol (i USD)
-# Detta används för lot size-beräkning
 PIP_VALUE_USD = {
-    "EURUSD": 10.0,    # 1 lot = 100,000 EUR, 1 pip = $10
-    "GBPUSD": 10.0,
-    "AUDUSD": 10.0,
-    "NZDUSD": 10.0,
-    "USDCHF": 10.5,
-    "USDJPY": 9.5,
-    "USDCAD": 7.3,
-    "XAUUSD": 10.0,    # 1 lot = 100 oz, 1 pip ($0.10) = $10
-    "XAGUSD": 50.0,
+    "EURUSD": 10.0, "GBPUSD": 10.0, "AUDUSD": 10.0, "NZDUSD": 10.0,
+    "USDCHF": 10.5, "USDJPY": 9.5, "USDCAD": 7.3,
+    "XAUUSD": 10.0, "XAGUSD": 50.0,
 }
 
-# Pip size (minsta prisrörelse) per symbol
 PIP_SIZE = {
-    "EURUSD": 0.0001,
-    "GBPUSD": 0.0001,
-    "AUDUSD": 0.0001,
-    "NZDUSD": 0.0001,
-    "USDCHF": 0.0001,
-    "USDJPY": 0.01,
-    "USDCAD": 0.0001,
-    "XAUUSD": 0.10,
-    "XAGUSD": 0.001,
+    "EURUSD": 0.0001, "GBPUSD": 0.0001, "AUDUSD": 0.0001, "NZDUSD": 0.0001,
+    "USDCHF": 0.0001, "USDJPY": 0.01, "USDCAD": 0.0001,
+    "XAUUSD": 0.10, "XAGUSD": 0.001,
 }
 
 
 def get_pip_value(symbol: str) -> float:
-    """Returnera pip-värde i USD per standard-lot."""
-    # Normalisera (ta bort suffix som .x, _, etc.)
     clean = symbol.upper().replace(".", "").replace("_", "")[:6]
-    return PIP_VALUE_USD.get(clean, 10.0)  # default $10/pip
+    return PIP_VALUE_USD.get(clean, 10.0)
 
 
 def get_pip_size(symbol: str) -> float:
-    """Returnera pip-storlek (smallest price unit)."""
     clean = symbol.upper().replace(".", "").replace("_", "")[:6]
     return PIP_SIZE.get(clean, 0.0001)
 
 
 def calculate_lot_size(symbol: str, entry: float, sl: float, balance: float, risk_pct: float) -> dict:
-    """
-    Beräknar lot size baserat på account balance, risk %, och SL-distans.
-
-    Returns:
-        dict med lot, risk_dollars, sl_pips, pip_value_used
-    """
     risk_dollars = balance * (risk_pct / 100.0)
     sl_distance_price = abs(entry - sl)
     pip_size = get_pip_size(symbol)
@@ -87,9 +64,8 @@ def calculate_lot_size(symbol: str, entry: float, sl: float, balance: float, ris
     if sl_pips == 0 or pip_value == 0:
         return {"lot": 0, "risk_dollars": risk_dollars, "sl_pips": 0, "pip_value": pip_value}
 
-    # Lot size = risk_dollars / (sl_pips × pip_value_per_lot)
     lot = risk_dollars / (sl_pips * pip_value)
-    lot = round(lot, 2)  # mikro-lot precision
+    lot = round(lot, 2)
 
     return {
         "lot": lot,
@@ -100,7 +76,6 @@ def calculate_lot_size(symbol: str, entry: float, sl: float, balance: float, ris
 
 
 def calculate_tp_profit(symbol: str, entry: float, tp: float, lot: float) -> float:
-    """Beräknar dollar-profit om TP träffas."""
     distance_price = abs(tp - entry)
     pip_size = get_pip_size(symbol)
     tp_pips = distance_price / pip_size
@@ -109,13 +84,12 @@ def calculate_tp_profit(symbol: str, entry: float, tp: float, lot: float) -> flo
 
 
 def parse_tradingview_alert(alert_text: str) -> dict:
-    """Försök extrahera trade-data från TradingView alert text."""
+    """Försök extrahera trade-data från TradingView alert text (legacy fallback)."""
     lines = [line.strip() for line in alert_text.splitlines() if line.strip()]
     parsed = {}
 
     if lines:
         header = lines[0]
-        # exempel: EURUSD T1 (1st) [London] [EUR]
         header_match = re.search(r"\b([A-Z]{3,6}(?:USD|EUR|JPY|GBP|CHF|AUD|CAD|NZD))\b", header)
         if header_match:
             parsed["symbol"] = header_match.group(1)
@@ -160,7 +134,6 @@ def parse_tradingview_alert(alert_text: str) -> dict:
             if side_match:
                 parsed["side"] = side_match.group(1).upper()
 
-    # Fallbacks from inline text
     if "symbol" not in parsed:
         symbol_match = re.search(r"\b([A-Z]{3,6}(?:USD|EUR|JPY|GBP|CHF|AUD|CAD|NZD))\b", alert_text)
         if symbol_match:
@@ -180,8 +153,15 @@ def parse_tradingview_alert(alert_text: str) -> dict:
 
 
 # ==================== MESSAGE FORMATTING ====================
-def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float) -> str:
-    """Bygger ett snyggt formatterat Telegram-meddelande från alert data."""
+
+def get_chart_url(symbol: str) -> str:
+    """Bygger TradingView chart-länk för en symbol."""
+    clean = symbol.upper().replace(".", "").replace("_", "")[:6]
+    return f"https://www.tradingview.com/chart/?symbol={clean}"
+
+
+def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evaluation: dict) -> str:
+    """Bygger ett snyggt formatterat Telegram-meddelande från alert data + signal evaluation."""
     side = data.get("side", "?").upper()
     arrow = "▲" if side == "LONG" else "▼"
     symbol = data.get("symbol", "?")
@@ -197,13 +177,14 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float) -> str
     swept = data.get("swept", "")
     after_manip = data.get("after_manipulation", False)
     asia_wide = data.get("asia_wide", False)
+    htf_aligned = data.get("htf_aligned", False)
 
     profile_tag = f" [{profile}]" if profile else ""
     session_tag = f" [{session}]" if session else ""
     trade_tag = f" {trade_type}" if trade_type else ""
     tp_source_tag = f" @{tp_src}" if tp_src else ""
     sl_source_tag = f"{sl_src}" if sl_src else ""
-    sl_source_has_pips = "pips" in sl_src.lower()
+    sl_source_has_pips = "pips" in sl_src.lower() if sl_src else False
     rr_tag = f" ({rr}R)" if rr else ""
 
     msg = f"<b>{arrow} {symbol}{trade_tag}{session_tag}{profile_tag}</b>\n"
@@ -222,52 +203,46 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float) -> str
     msg += f"TP: <b>{tp}</b>{tp_source_tag}{rr_tag}\n\n"
     msg += f"💰 Lot: <b>{lot_calc['lot']}</b> | Risk: ${lot_calc['risk_dollars']} | TP profit: ${tp_profit}\n"
 
+    flags = []
     if swept:
-        msg += f"Swept: {swept}\n"
+        flags.append(f"Swept: {swept}")
     if after_manip:
-        msg += "✓ AFTER MANIPULATION\n"
+        flags.append("✓ AFTER MANIPULATION")
+    if htf_aligned:
+        flags.append("✓ HTF ALIGNED")
     if asia_wide:
-        msg += "⚠ ASIA WIDE\n"
+        flags.append("⚠ ASIA WIDE")
+    if flags:
+        msg += "\n".join(flags) + "\n"
 
-    msg += "\n📊 <i>Sparat i databas</i>"
+    rating = evaluation.get("rating", "?")
+    score = evaluation.get("score", 0)
+    rating_emoji = "🟢" if rating == "A+" else ("🟡" if rating == "B" else "🔴")
+    msg += f"\n🧠 <b>Signal Quality:</b> {rating_emoji} <b>{rating}</b> ({score}/10)\n"
+
+    reasons = evaluation.get("reasons", [])[:5]
+    if reasons:
+        msg += "<i>" + " | ".join(reasons) + "</i>\n"
+
+    chart_url = get_chart_url(symbol)
+    msg += f"\n📊 <a href=\"{chart_url}\">View Chart on TradingView</a>"
+    msg += "\n💾 <i>Sparat i databas</i>"
+
     return msg
 
 
 # ==================== WEBHOOK ENDPOINT ====================
+
 @app.get("/")
 async def root():
-    """Health check — visa att webhook lever."""
-    return {"status": "WiseMind Webhook Receiver är igång", "version": "1.0"}
+    return {"status": "WiseMind Webhook Receiver är igång", "version": "9.17"}
 
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
-    """
-    Tar emot TradingView alert som JSON.
-    Förväntat format (från Pine v9.15):
-    {
-        "secret": "wisemind2026",
-        "symbol": "EURUSD",
-        "side": "LONG",
-        "trade": "T1 (1st)",
-        "session": "London",
-        "profile": "EUR",
-        "entry": 1.16920,
-        "sl": 1.16860,
-        "sl_source": "engulf",
-        "tp": 1.17430,
-        "tp_source": "PDH",
-        "rr": 5.0,
-        "swept": "AL",
-        "after_manipulation": false,
-        "asia_wide": false,
-        "tf": "5m"
-    }
-    """
     try:
         data = await request.json()
 
-        # Försök läsa in data från TradingView alert-message om vanliga fält saknas
         if not all(field in data for field in ["symbol", "side", "entry", "sl", "tp"]):
             alert_text = data.get("alert_message") or data.get("message") or data.get("text")
             if isinstance(alert_text, str):
@@ -277,19 +252,16 @@ async def receive_webhook(request: Request):
 
         logger.info(f"Webhook received: {data.get('symbol')} {data.get('side')} {data.get('trade')}")
 
-        # Verifiera secret
         if data.get("secret") != WEBHOOK_SECRET:
             logger.warning(f"Webhook secret mismatch! Got: {data.get('secret')}")
             raise HTTPException(status_code=401, detail="Invalid secret")
 
-        # Validera nödvändiga fält
         required = ["symbol", "side", "entry", "sl", "tp"]
         for field in required:
             if field not in data:
                 logger.error(f"Webhook missing field: {field}")
                 raise HTTPException(status_code=400, detail=f"Missing field: {field}")
 
-        # Beräkna lot size
         lot_calc = calculate_lot_size(
             symbol=data["symbol"],
             entry=float(data["entry"]),
@@ -298,7 +270,6 @@ async def receive_webhook(request: Request):
             risk_pct=ACCOUNT_RISK_PERCENT,
         )
 
-        # Beräkna TP profit
         tp_profit = calculate_tp_profit(
             symbol=data["symbol"],
             entry=float(data["entry"]),
@@ -306,18 +277,17 @@ async def receive_webhook(request: Request):
             lot=lot_calc["lot"],
         )
 
-        # Evaluera signalen mot WiseMind-regler
-        signal_evaluation = evaluate_signal(data)
-        evaluation_text = f"\n\n🧠 **Signal Evaluation:** {signal_evaluation['explanation']}"
+        evaluation = evaluate_signal(data)
+        logger.info(f"Signal evaluation: {evaluation['rating']} ({evaluation['score']}/10)")
 
-        # Spara i databas
         try:
             note = (
                 f"{data.get('trade', '')} | {data.get('session', '')} | RR:{data.get('rr', 0)} | Lot:{lot_calc['lot']} | "
-                f"Swept:{data.get('swept', 'MISSING')} | Displacement:{data.get('displacement', 'unknown')} | "
-                f"PD:{data.get('pd_zone', 'unknown')} | AsiaWide:{data.get('asia_wide', False)} | "
-                f"AfterManip:{data.get('after_manipulation', False)} | TF:{data.get('tf', '')} | "
-                f"Rating:{signal_evaluation['rating']} | Score:{signal_evaluation['score']}/10"
+                f"Swept:{data.get('swept', '')} | DispATR:{data.get('displacement_atr', 0)} | "
+                f"EngulfPct:{data.get('engulf_body_pct', 0)} | VolSpike:{data.get('vol_spike', 0)} | "
+                f"HTF:{data.get('htf_aligned', False)} | AfterManip:{data.get('after_manipulation', False)} | "
+                f"AsiaWide:{data.get('asia_wide', False)} | TF:{data.get('tf', '')} | "
+                f"Rating:{evaluation['rating']} | Score:{evaluation['score']}/10"
             )
             await save_trade(
                 symbol=data["symbol"],
@@ -329,20 +299,20 @@ async def receive_webhook(request: Request):
         except Exception as e:
             logger.error(f"Failed to save trade: {e}")
 
-        # Bygg Telegram-meddelande
-        msg = format_telegram_message(data, lot_calc, tp_profit) + evaluation_text
+        msg = format_telegram_message(data, lot_calc, tp_profit, evaluation)
 
-        # Posta till Telegram-gruppen
         try:
             await telegram_bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
                 text=msg,
                 parse_mode="HTML",
+                disable_web_page_preview=False,
             )
             logger.info("Posted to Telegram")
             alert_summary = (
                 f"TradingView alert received: {data.get('symbol')} {data.get('side')} {data.get('trade')} "
-                f"entry={data.get('entry')} sl={data.get('sl')} tp={data.get('tp')} rr={data.get('rr')} tf={data.get('tf')}"
+                f"entry={data.get('entry')} sl={data.get('sl')} tp={data.get('tp')} rr={data.get('rr')} "
+                f"rating={evaluation['rating']} score={evaluation['score']}/10"
             )
             await save_message(
                 chat_id=TELEGRAM_CHAT_ID,
@@ -360,6 +330,8 @@ async def receive_webhook(request: Request):
             "lot": lot_calc["lot"],
             "risk_dollars": lot_calc["risk_dollars"],
             "tp_profit": tp_profit,
+            "rating": evaluation["rating"],
+            "score": evaluation["score"],
         }
 
     except HTTPException:
@@ -375,7 +347,7 @@ async def test_endpoint():
     try:
         await telegram_bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
-            text="✅ <b>Webhook test</b>\nWiseMind webhook receiver fungerar!",
+            text="✅ <b>Webhook test</b>\nWiseMind webhook receiver fungerar (v9.17)!",
             parse_mode="HTML",
         )
         return {"status": "Test message sent"}
