@@ -1,12 +1,23 @@
+"""
+WiseMind AI — Telegram bot + FastAPI webhook (unified async architecture)
+
+v9.21+ improvements:
+- Webhook + bot run on SAME asyncio event loop (no threading race conditions)
+- Proper graceful shutdown
+- Logs everything clearly so Railway deploy logs show all startup steps
+"""
+
 import asyncio
 import logging
+import os
 import time
-import threading
 from datetime import datetime
+
 import uvicorn
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from anthropic import Anthropic
+
 from config import (
     TELEGRAM_BOT_TOKEN,
     CLAUDE_API_KEY,
@@ -111,13 +122,11 @@ TONE_INSTRUCTIONS = {
 
 def detect_user_tone(user_text: str) -> tuple[str, str]:
     text_lower = user_text.lower()
-    best_match = "neutral"
     for tone, words in TONE_KEYWORDS.items():
         for word in words:
             if word in text_lower:
-                best_match = tone
-                return best_match, TONE_INSTRUCTIONS[tone]
-    return best_match, TONE_INSTRUCTIONS[best_match]
+                return tone, TONE_INSTRUCTIONS[tone]
+    return "neutral", TONE_INSTRUCTIONS["neutral"]
 
 
 def parse_trade_note(note: str) -> dict:
@@ -137,12 +146,9 @@ def parse_trade_note(note: str) -> dict:
 def detect_trade_patterns(trades: list[dict]) -> str:
     if not trades:
         return ""
-
     repeated_sweep_missing = 0
-    total_trades = len(trades)
     lot_values = []
     time_stamps = []
-    sweep_miss_trades = []
 
     for trade in trades:
         note = trade.get("note", "")
@@ -156,7 +162,6 @@ def detect_trade_patterns(trades: list[dict]) -> str:
         swept = parsed.get("swept", "").upper()
         if swept in ["MISSING", "NO", "NONE", ""]:
             repeated_sweep_missing += 1
-            sweep_miss_trades.append(trade)
         timestamp = trade.get("timestamp")
         if timestamp:
             try:
@@ -167,19 +172,17 @@ def detect_trade_patterns(trades: list[dict]) -> str:
     patterns = []
     if repeated_sweep_missing >= 3:
         patterns.append("Det här liknar dina senaste 3 trades där du inte hade sweep.")
-
-    if len(trade_timestamps := sorted(time_stamps, reverse=True)) >= 3:
+    trade_timestamps = sorted(time_stamps, reverse=True)
+    if len(trade_timestamps) >= 3:
         now = trade_timestamps[0]
         within_24h = sum(1 for ts in trade_timestamps if (now - ts).total_seconds() <= 86400)
         if within_24h >= 3:
             patterns.append("Du har tagit många trades på kort tid. Det kan vara överhandel.")
-
     if lot_values:
         avg_lot = sum(lot_values) / len(lot_values)
         latest_lot = lot_values[0]
         if avg_lot > 0 and latest_lot > avg_lot * 2:
             patterns.append("Din senaste lot size avviker kraftigt från din norm. Kontrollera riskhanteringen.")
-
     return " ".join(patterns)
 
 
@@ -287,20 +290,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Failed to save message: {e}")
     if "@wisefx_bot" in text_lower or "wisemind" in text_lower:
         logger.info(f"Bot tagged by {username} ({user_id}) in chat {chat_id}: {text[:80]}")
-
-        # Försök extrahera och evaluera signal från användartext
         signal_evaluation = None
         signal_data = extract_signal_data_from_text(text)
         if signal_data:
             signal_evaluation = evaluate_signal(signal_data)
             logger.info(f"Signal evaluation from user text: {signal_evaluation}")
-
         try:
-            # Modifiera text för Claude om vi har signaldata
             claude_text = text
             if signal_evaluation:
                 claude_text += f"\n\n[Signal Evaluation: {signal_evaluation['explanation']}]"
-
             response = await claude_response(claude_text, chat_id, username)
             await update.message.reply_text(response)
             try:
@@ -323,7 +321,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     username = update.effective_user.first_name or update.effective_user.username or "okänd"
@@ -366,7 +363,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if extracted_text:
             await save_message(chat_id, user_id, username, "user", f"Extracted text from {filename}:\n{extracted_text}")
 
-        # Försök extrahera och evaluera signal från extracted text
         signal_evaluation = None
         if extracted_text:
             signal_data = extract_signal_data_from_text(extracted_text)
@@ -411,48 +407,68 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
 
 
-# ==================== WEBHOOK SERVER (KÖR I BAKGRUND) ====================
-def start_webhook_server():
-    """Starta FastAPI webhook-servern i en separat thread."""
-    logger.info(f"Starting webhook server on port {WEBHOOK_PORT}")
-    uvicorn.run(
+# ==================== UNIFIED ASYNC STARTUP ====================
+async def run_bot_and_webhook():
+    """Run Telegram bot and FastAPI webhook on the same asyncio event loop."""
+    # 1. Initialize database
+    logger.info("=" * 60)
+    logger.info("🚀 WiseMind AI starting...")
+    logger.info("=" * 60)
+    await init_db()
+    logger.info("✅ Database initialized (conversation memory + trades)")
+
+    # 2. Build Telegram bot application
+    bot_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    bot_app.add_handler(CommandHandler("start", cmd_start))
+    bot_app.add_handler(CommandHandler("last", cmd_last))
+    bot_app.add_handler(CommandHandler("clearmemory", cmd_clear_memory))
+    bot_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    bot_app.add_error_handler(error_handler)
+    logger.info("✅ Telegram bot handlers registered")
+
+    # 3. Configure uvicorn server (programmatic, NOT uvicorn.run)
+    uvicorn_config = uvicorn.Config(
         webhook_app,
         host="0.0.0.0",
         port=WEBHOOK_PORT,
-        log_level="warning",
+        log_level="info",
+        access_log=True,
     )
+    uvicorn_server = uvicorn.Server(uvicorn_config)
+    logger.info(f"✅ Webhook configured: http://0.0.0.0:{WEBHOOK_PORT}/webhook")
+    logger.info(f"   PORT env var resolved to: {WEBHOOK_PORT}")
 
+    # 4. Start Telegram bot (must initialize before run)
+    await bot_app.initialize()
+    await bot_app.start()
+    await bot_app.updater.start_polling(drop_pending_updates=True)
+    logger.info("✅ Telegram bot polling started")
 
-# ==================== START ====================
-def main():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
+    # 5. Run uvicorn forever (this blocks until shutdown)
+    logger.info("🌐 Webhook server starting (uvicorn.serve)...")
+    logger.info("=" * 60)
+    logger.info("🎯 WiseMind AI is LIVE — listening for TradingView webhooks + Telegram messages")
+    logger.info("=" * 60)
     try:
-        loop.run_until_complete(init_db())
-        logger.info("Database initialized (with conversation memory + trades)")
-
-        # Starta webhook-server i bakgrundsthread
-        webhook_thread = threading.Thread(target=start_webhook_server, daemon=True)
-        webhook_thread.start()
-        logger.info(f"✅ Webhook listening on http://0.0.0.0:{WEBHOOK_PORT}/webhook")
-
-        # Starta Telegram-bot i huvudthread
-        app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-        app.add_handler(CommandHandler("start", cmd_start))
-        app.add_handler(CommandHandler("last", cmd_last))
-        app.add_handler(CommandHandler("clearmemory", cmd_clear_memory))
-        app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_error_handler(error_handler)
-
-        logger.info("WiseMind AI starting... (Telegram bot + Webhook receiver)")
-        logger.info("Try: @Wisefx_bot hej")
-
-        app.run_polling(drop_pending_updates=True)
-
+        await uvicorn_server.serve()
     finally:
-        loop.close()
+        logger.info("Shutdown signal received — stopping bot and webhook...")
+        await bot_app.updater.stop()
+        await bot_app.stop()
+        await bot_app.shutdown()
+        logger.info("Clean shutdown complete.")
+
+
+def main():
+    """Entry point. Runs the unified async server."""
+    try:
+        asyncio.run(run_bot_and_webhook())
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user.")
+    except Exception as e:
+        logger.error(f"Fatal error in main: {type(e).__name__}: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
