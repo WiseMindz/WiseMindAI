@@ -31,7 +31,8 @@ CLAUDE_MODEL = CLAUDE_MODEL_SMART
 
 # ==================== WEBHOOK ====================
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "wisemind2026")
-WEBHOOK_PORT = get_int_env("PORT", get_int_env("WEBHOOK_PORT", 8000))
+# Railway sätter automatiskt PORT — använd den om den finns, annars fallback till 8000
+WEBHOOK_PORT = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8000")))
 
 # ==================== ACCOUNT (LOT SIZE BERÄKNING) ====================
 # Konto-info för auto lot size
