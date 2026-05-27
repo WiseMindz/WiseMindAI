@@ -61,17 +61,28 @@ claude = AsyncAnthropic(api_key=CLAUDE_API_KEY)
 
 # ==================== SMART ROUTING ====================
 SMART_KEYWORDS = [
+    # Setup & structure
     "strategi", "setup", "trade", "trades", "entry", "entries", "exit",
     "killzone", "killzon", "sweep", "displacement", "manipulation",
-    "fvg", "ob", "order block", "liquidity", "asia", "london", "ny",
-    "t1", "t2", "amd", "session",
+    "fvg", "ob", "order block", "orderblock", "liquidity", "asia", "london", "ny",
+    "t1", "t2", "amd", "session", "breaker", "mitigation", "imbalance",
+    "bpr", "ifvg", "choch", "mss", "bos", "cisd", "inducement",
+    "premium", "discount", "pd array", "dealing range", "equilibrium",
+    "smart money", "icт", "ict", "internal", "external", "swing",
+    "htf", "ltf", "higher time", "lower time", "confluence",
+    # Analysis requests
     "analysera", "analys", "förklara", "djupgående", "detaljerat",
-    "skillnad", "varför", "hur kommer det sig",
+    "skillnad", "varför", "hur kommer det sig", "vad betyder",
+    "explain", "analyze", "analysis", "what is", "how does", "why did",
+    "review", "feedback", "evaluate", "rate my",
+    # Psychology & discipline
     "psykologi", "disciplin", "känslor", "frustrerad", "revenge",
-    "förlust", "förlorade", "drawdown", "tilt", "stressad",
+    "förlust", "förlorade", "drawdown", "tilt", "stressad", "fomo",
+    "psychology", "discipline", "emotions", "lost", "losing", "tilt",
+    "overtrading", "överhandel", "impuls", "impulse",
+    # Risk
     "risk", "riskhantering", "lot size", "lotsize", "position size",
-    "strategy", "explain", "analyze", "analysis", "psychology",
-    "feedback", "review", "discipline", "lost", "losing",
+    "prop firm", "drawdown", "max loss", "daily loss", "consistency",
 ]
 
 FORCE_FAST_PREFIX = "[snabb]"
@@ -102,21 +113,57 @@ def strip_force_prefix(user_text: str) -> str:
 
 
 TONE_KEYWORDS = {
-    "frustrated": ["frustrerad", "stress", "stressad", "arg", "besviken", "trött", "rädd", "förtvivlad", "jävla", "fuck", "idiot", "misslyckad", "förlorad", "förlust", "suck"],
-    "overconfident": ["enkelt", "lätt", "given", "safe", "garanterat", "no risk", "maxade", "100%", "säker", "det här vinner", "oslagbar", "scoop", "take it"],
-    "fearful": ["oroar", "orolig", "rädd", "feg", "fomo", "ångest", "nervös", "stressad", "tvekar", "osäker"],
-    "revenge": ["revenge", "ta igen", "ta tillbaka", "hämd", "illska", "sätta tillbaka", "komma tillbaka", "make up"],
-    "high_risk": ["riskerar", "för mycket", "max risk", "stor lot", "lot size", "high risk", "överrisk", "överdrivet"],
+    "frustrated": [
+        "frustrerad", "stress", "stressad", "arg", "besviken", "trött", "rädd", "förtvivlad",
+        "jävla", "fuck", "idiot", "misslyckad", "förlorad", "förlust", "suck", "hopplös",
+        "ger upp", "orkar inte", "fan", "helvete", "irriterad", "lost", "burned out",
+        "done with this", "hate this", "not working", "frustrated", "annoyed",
+    ],
+    "overconfident": [
+        "enkelt", "lätt", "given", "safe", "garanterat", "no risk", "maxade", "100%",
+        "säker", "det här vinner", "oslagbar", "scoop", "take it", "självklart",
+        "kan inte gå fel", "easy money", "obvious", "guaranteed", "cant lose",
+        "crushing it", "on fire", "unstoppable", "printing money",
+    ],
+    "fearful": [
+        "oroar", "orolig", "rädd", "feg", "fomo", "ångest", "nervös", "stressad",
+        "tvekar", "osäker", "inte säker", "vet inte", "kanske", "ska jag",
+        "afraid", "scared", "not sure", "uncertain", "hesitating", "worried",
+        "missing out", "missar",
+    ],
+    "revenge": [
+        "revenge", "ta igen", "ta tillbaka", "hämd", "illska", "sätta tillbaka",
+        "komma tillbaka", "make up", "make it back", "win it back", "double down",
+        "dubblar", "ökar", "last trade", "one more", "en till", "just en till",
+        "sista trade", "ska ta igen",
+    ],
+    "high_risk": [
+        "riskerar", "för mycket", "max risk", "stor lot", "lot size", "high risk",
+        "överrisk", "överdrivet", "big lot", "max lot", "all in", "allt in",
+        "bigger size", "increase risk", "ökar risk", "full risk",
+    ],
+    "early_entry": [
+        "gick in tidigt", "lite tidigt", "innan engulfing", "innan bekräftelse",
+        "tyckte det såg bra ut", "såg bra ut", "kändes rätt", "went in early",
+        "early entry", "before confirmation", "jumped in",
+    ],
+    "system_doubt": [
+        "systemet funkar inte", "indikatorn är fel", "strategin funkar inte",
+        "ingen edge", "strategy doesn't work", "indicator wrong", "system broken",
+        "the system", "quit trading", "slutar trада",
+    ],
 }
 
 
 TONE_INSTRUCTIONS = {
-    "frustrated": "The user is frustrated or burned out. Be calm, supportive, and process-focused. Reinforce discipline and help them refocus on the next correct step.",
-    "overconfident": "The user is overconfident. Push back gently, emphasize the system rules, and warn against taking unnecessary risk or impulsive trades.",
-    "fearful": "The user is fearful or uncertain. Offer clear guidance, reduce complexity, and remind them to trade only when the setup fits the rules.",
-    "revenge": "The user is showing revenge or ego-driven language. Challenge this behavior directly and remind them that revenge trading is the fastest way to lose.",
-    "high_risk": "The user is talking about high risk or large position size. Warn about risk limits and force them back to proper risk management.",
-    "neutral": "The user tone is neutral. Respond with clear, rational, and rule-based feedback.",
+    "frustrated": "The user is frustrated or burned out. Be calm, grounding, and process-focused. Use short sentences. Acknowledge the feeling first, then redirect to the next correct step. Don't lecture.",
+    "overconfident": "The user is overconfident. Push back directly. Emphasize that 5 winning trades prove nothing. Challenge their assumptions. Ask what their exit plan is if they lose now. Don't validate the overconfidence.",
+    "fearful": "The user is fearful or showing FOMO. Offer clear, structured guidance. Reduce complexity to one thing at a time. Remind them: no trade is the last trade. Ask: what does the setup checklist say?",
+    "revenge": "CRITICAL: The user is showing revenge trading signals. Stop them immediately. Name the behavior directly — revenge trading destroys accounts in days. Ask how many times they've seen this pattern in themselves. Suggest closing the platform now.",
+    "high_risk": "The user is discussing high risk or oversized positions. Hard stop on encouragement. Warn about risk limits. Ask: what does your risk management rule say? Remind them risk is not scaled until discipline is consistent.",
+    "early_entry": "The user took or is considering an early entry without confirmation. Challenge this directly. Ask: why didn't you wait for the engulfing? Remind them early entry is retail logic, not smart money logic.",
+    "system_doubt": "The user is doubting their system after losses. Separate system from execution — it's almost always execution. Ask: which specific checklist criterion wasn't met on the last losing trade? System works. Execution varies.",
+    "neutral": "The user tone is neutral. Respond with clear, rational, rule-based feedback. Use the Socratic method when appropriate — ask one good question instead of giving all the answers.",
 }
 
 
@@ -146,22 +193,39 @@ def parse_trade_note(note: str) -> dict:
 def detect_trade_patterns(trades: list[dict]) -> str:
     if not trades:
         return ""
+
     repeated_sweep_missing = 0
+    repeated_losses = 0
     lot_values = []
     time_stamps = []
+    results = []
+    sessions = []
 
     for trade in trades:
         note = trade.get("note", "")
         parsed = parse_trade_note(note)
+
+        # Lot sizes
         lot = parsed.get("lot")
         if lot:
             try:
                 lot_values.append(float(lot))
             except ValueError:
                 pass
+
+        # Sweep missing
         swept = parsed.get("swept", "").upper()
         if swept in ["MISSING", "NO", "NONE", ""]:
             repeated_sweep_missing += 1
+
+        # Results
+        result = trade.get("result", "").lower()
+        if result in ["loss", "sl", "stopped out", "förlust", "-"]:
+            repeated_losses += 1
+        else:
+            repeated_losses = 0  # reset on win
+
+        # Timestamps
         timestamp = trade.get("timestamp")
         if timestamp:
             try:
@@ -169,21 +233,69 @@ def detect_trade_patterns(trades: list[dict]) -> str:
             except Exception:
                 pass
 
+        # Sessions
+        session = parsed.get("session", "").lower()
+        if session:
+            sessions.append(session)
+
     patterns = []
+
+    # Sweep discipline
     if repeated_sweep_missing >= 3:
-        patterns.append("Det här liknar dina senaste 3 trades där du inte hade sweep.")
+        patterns.append(
+            f"PATTERN: Sweep missing på {repeated_sweep_missing} av de senaste trades. "
+            "Du sänker din entry-standard. A+ kräver bekräftat sweep."
+        )
+
+    # Loss streak — trigger loss control protocol
+    if repeated_losses >= 2:
+        patterns.append(
+            f"LOSS STREAK DETECTED: {repeated_losses} förluster i rad. "
+            "Enligt WiseMind-regler ska trading stoppas vid 2 förluster. Fråga användaren om de fortfarande tradar."
+        )
+    if repeated_losses >= 3:
+        patterns.append(
+            "CRITICAL: 3 förluster i rad detekterade. 48 timmars tvångspaus är obligatorisk enligt systemreglerna."
+        )
+
+    # Overtrading
     trade_timestamps = sorted(time_stamps, reverse=True)
     if len(trade_timestamps) >= 3:
         now = trade_timestamps[0]
         within_24h = sum(1 for ts in trade_timestamps if (now - ts).total_seconds() <= 86400)
-        if within_24h >= 3:
-            patterns.append("Du har tagit många trades på kort tid. Det kan vara överhandel.")
-    if lot_values:
-        avg_lot = sum(lot_values) / len(lot_values)
+        if within_24h >= 4:
+            patterns.append(
+                f"OVERTRADING: {within_24h} trades på 24 timmar. Max är 2 trades per dag för A+ setups. "
+                "Fråga vad som drev de extra tradesen."
+            )
+        elif within_24h >= 3:
+            patterns.append(
+                f"TRADE COUNT: {within_24h} trades senaste 24h — vid gränsen för dagsgräns. Påminn om max 2/dag."
+            )
+
+    # Lot spike — risk escalation
+    if lot_values and len(lot_values) >= 2:
+        avg_lot = sum(lot_values[1:]) / len(lot_values[1:])
         latest_lot = lot_values[0]
-        if avg_lot > 0 and latest_lot > avg_lot * 2:
-            patterns.append("Din senaste lot size avviker kraftigt från din norm. Kontrollera riskhanteringen.")
-    return " ".join(patterns)
+        if avg_lot > 0 and latest_lot > avg_lot * 2.5:
+            patterns.append(
+                f"RISK SPIKE: Senaste lot ({latest_lot:.2f}) är {latest_lot/avg_lot:.1f}x normen ({avg_lot:.2f}). "
+                "Möjligt revenge trading eller feltänkt position sizing. Flagga direkt."
+            )
+        elif avg_lot > 0 and latest_lot > avg_lot * 1.75:
+            patterns.append(
+                f"LOT INCREASE: Senaste lot är {latest_lot/avg_lot:.1f}x genomsnittet. Kontrollera om risk-eskalering sker."
+            )
+
+    # Session pattern — trading outside killzones
+    non_kz_sessions = [s for s in sessions if s not in ["london", "london+ext", "ny", "new york"]]
+    if len(non_kz_sessions) >= 2:
+        patterns.append(
+            "OFF-KILLZONE TRADES detekterade. Trades utanför London/NY killzone har signifikant lägre edge. "
+            "Fråga varför användaren inte väntade på killzone."
+        )
+
+    return " | ".join(patterns) if patterns else ""
 
 
 def build_messages_for_claude(history: list, current_user_text: str, current_username: str) -> list:
