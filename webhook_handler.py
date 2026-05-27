@@ -302,8 +302,7 @@ async def receive_webhook(request: Request):
         msg = format_telegram_message(data, lot_calc, tp_profit, evaluation)
 
         # Broadcast only to configured Telegram chat_id
-        BROADCAST_TARGETS = [TELEGRAM_CHAT_ID, -1003953660219]
-        BROADCAST_TARGETS = list(dict.fromkeys(BROADCAST_TARGETS))
+        BROADCAST_TARGETS = [TELEGRAM_CHAT_ID]
 
         post_results = []
         for target_chat_id in BROADCAST_TARGETS:
@@ -360,8 +359,7 @@ async def receive_webhook(request: Request):
 @app.post("/test")
 async def test_endpoint():
     """Test-endpoint för att verifiera Telegram broadcast i konfigurerade grupper."""
-    BROADCAST_TARGETS = [TELEGRAM_CHAT_ID, -1003953660219]
-    BROADCAST_TARGETS = list(dict.fromkeys(BROADCAST_TARGETS))
+    BROADCAST_TARGETS = [TELEGRAM_CHAT_ID]
 
     results = []
     for target_chat_id in BROADCAST_TARGETS:

@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.env.local
+bot.log
+*.log
+uploads/
+.DS_Store
+run_LOCAL_DEV_ONLY.py
