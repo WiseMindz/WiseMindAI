@@ -1,9 +1,13 @@
 """
 Webhook handler för TradingView-alerts.
-Tar emot JSON från Pine Script v9.17+, sparar i DB, postar till Telegram.
+Tar emot JSON från Pine Script v9.22+, sparar i DB, postar till Telegram.
 
-v9.17 schema includes deep signal data fields:
-- displacement_atr, engulf_body_pct, vol_spike, htf_aligned
+v9.22 schema adds:
+- quality_score (int 0-100, Pine-computed)
+- quality_grade ("A+" | "B" | "C", Pine-computed)
+- tf_type ("5m" | "1m", explicit TF tag)
+- conflict_resolved (bool, HTF/LTF conflict was resolved)
+- version ("9.22")
 """
 
 import logging
@@ -161,7 +165,7 @@ def get_chart_url(symbol: str) -> str:
 
 
 def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evaluation: dict) -> str:
-    """Bygger ett snyggt formatterat Telegram-meddelande från alert data + signal evaluation."""
+    """Bygger ett snyggt formatterat Telegram-meddelande från alert data + signal evaluation (v9.22)."""
     side = data.get("side", "?").upper()
     arrow = "▲" if side == "LONG" else "▼"
     symbol = data.get("symbol", "?")
@@ -178,16 +182,22 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
     after_manip = data.get("after_manipulation", False)
     asia_wide = data.get("asia_wide", False)
     htf_aligned = data.get("htf_aligned", False)
+    # v9.22 fields
+    tf_type = str(data.get("tf_type", data.get("tf", ""))).upper()
+    conflict_resolved = data.get("conflict_resolved", False)
+    pine_version = data.get("version", "")
 
     profile_tag = f" [{profile}]" if profile else ""
+    # Normalise "London+ext" display → "London+ext" kept as-is (informative)
     session_tag = f" [{session}]" if session else ""
     trade_tag = f" {trade_type}" if trade_type else ""
     tp_source_tag = f" @{tp_src}" if tp_src else ""
     sl_source_tag = f"{sl_src}" if sl_src else ""
     sl_source_has_pips = "pips" in sl_src.lower() if sl_src else False
     rr_tag = f" ({rr}R)" if rr else ""
+    tf_tag = f" [{tf_type}]" if tf_type else ""
 
-    msg = f"<b>{arrow} {symbol}{trade_tag}{session_tag}{profile_tag}</b>\n"
+    msg = f"<b>{arrow} {symbol}{trade_tag}{session_tag}{profile_tag}{tf_tag}</b>\n"
     msg += f"Entry: <b>{entry}</b>\n"
     msg += f"SL: <b>{sl}</b>"
     if sl_source_tag or lot_calc.get("sl_pips"):
@@ -210,6 +220,8 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
         flags.append("✓ AFTER MANIPULATION")
     if htf_aligned:
         flags.append("✓ HTF ALIGNED")
+    if conflict_resolved:
+        flags.append("✓ CONFLICT RESOLVED")
     if asia_wide:
         flags.append("⚠ ASIA WIDE")
     if flags:
@@ -217,8 +229,18 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
 
     rating = evaluation.get("rating", "?")
     score = evaluation.get("score", 0)
+    pine_scored = evaluation.get("pine_scored", False)
     rating_emoji = "🟢" if rating == "A+" else ("🟡" if rating == "B" else "🔴")
-    msg += f"\n🧠 <b>Signal Quality:</b> {rating_emoji} <b>{rating}</b> ({score}/10)\n"
+
+    # Show Pine's raw 0-100 score when available, else /10
+    if pine_scored and data.get("quality_score") is not None:
+        score_display = f"{data['quality_score']}/100"
+        source_tag = " <i>[Pine]</i>"
+    else:
+        score_display = f"{score}/10"
+        source_tag = ""
+
+    msg += f"\n🧠 <b>Signal Quality:</b> {rating_emoji} <b>{rating}</b> ({score_display}){source_tag}\n"
 
     reasons = evaluation.get("reasons", [])[:5]
     if reasons:
@@ -226,6 +248,8 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
 
     chart_url = get_chart_url(symbol)
     msg += f"\n📊 <a href=\"{chart_url}\">View Chart on TradingView</a>"
+    if pine_version:
+        msg += f"\n<i>Pine v{pine_version}</i>"
     msg += "\n💾 <i>Sparat i databas</i>"
 
     return msg
@@ -235,7 +259,7 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
 
 @app.get("/")
 async def root():
-    return {"status": "WiseMind Webhook Receiver är igång", "version": "9.17"}
+    return {"status": "WiseMind Webhook Receiver är igång", "version": "9.22"}
 
 
 @app.post("/webhook")
@@ -281,13 +305,18 @@ async def receive_webhook(request: Request):
         logger.info(f"Signal evaluation: {evaluation['rating']} ({evaluation['score']}/10)")
 
         try:
+            pine_score_str = (
+                f"PineScore:{data.get('quality_score', '')}/{data.get('quality_grade', '')} | "
+                if data.get("quality_score") is not None else ""
+            )
             note = (
                 f"{data.get('trade', '')} | {data.get('session', '')} | RR:{data.get('rr', 0)} | Lot:{lot_calc['lot']} | "
                 f"Swept:{data.get('swept', '')} | DispATR:{data.get('displacement_atr', 0)} | "
                 f"EngulfPct:{data.get('engulf_body_pct', 0)} | VolSpike:{data.get('vol_spike', 0)} | "
                 f"HTF:{data.get('htf_aligned', False)} | AfterManip:{data.get('after_manipulation', False)} | "
-                f"AsiaWide:{data.get('asia_wide', False)} | TF:{data.get('tf', '')} | "
-                f"Rating:{evaluation['rating']} | Score:{evaluation['score']}/10"
+                f"AsiaWide:{data.get('asia_wide', False)} | TF:{data.get('tf', '')} | TFType:{data.get('tf_type', '')} | "
+                f"ConflictResolved:{data.get('conflict_resolved', False)} | Ver:{data.get('version', '')} | "
+                f"{pine_score_str}Rating:{evaluation['rating']} | Score:{evaluation['score']}/10"
             )
             await save_trade(
                 symbol=data["symbol"],
@@ -321,10 +350,16 @@ async def receive_webhook(request: Request):
 
         # Save alert to PRIMARY chat memory only (Claude context)
         try:
+            pine_q = (
+                f" | pine_quality={data.get('quality_score')}/{data.get('quality_grade')}"
+                if data.get("quality_score") is not None else ""
+            )
             alert_summary = (
                 f"TradingView alert received: {data.get('symbol')} {data.get('side')} {data.get('trade')} "
                 f"entry={data.get('entry')} sl={data.get('sl')} tp={data.get('tp')} rr={data.get('rr')} "
-                f"rating={evaluation['rating']} score={evaluation['score']}/10"
+                f"session={data.get('session')} tf_type={data.get('tf_type', data.get('tf', ''))} "
+                f"rating={evaluation['rating']} score={evaluation['score']}/10{pine_q} "
+                f"ver={data.get('version', 'legacy')}"
             )
             await save_message(
                 chat_id=TELEGRAM_CHAT_ID,
@@ -366,7 +401,7 @@ async def test_endpoint():
         try:
             await telegram_bot.send_message(
                 chat_id=target_chat_id,
-                text=f"✅ <b>Webhook test</b>\nWiseMind webhook receiver fungerar (v9.17)!\nThis chat_id: <code>{target_chat_id}</code>",
+                text=f"✅ <b>Webhook test</b>\nWiseMind webhook receiver fungerar (v9.22)!\nThis chat_id: <code>{target_chat_id}</code>",
                 parse_mode="HTML",
             )
             results.append({"chat_id": target_chat_id, "status": "ok"})

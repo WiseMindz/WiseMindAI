@@ -1,16 +1,17 @@
 """
 signal_utils.py — Signal evaluation for WiseMind AI
 
-Receives JSON from Pine v9.17 webhook OR text from user messages.
+Receives JSON from Pine v9.22 webhook OR text from user messages.
 Scores signals 0-10 and returns A+/B/C rating.
 
-v9.17 SCHEMA (what Pine sends in JSON):
+v9.22 SCHEMA (what Pine sends in JSON):
     {
         "secret": "wisemind2026",
+        "version": "9.22",
         "symbol": "EURUSD",
         "side": "LONG",
         "trade": "T1 LONG (1st)" | "T1 LONG (2nd)" | "T2 LONG (AMD)",
-        "session": "London" | "NY",
+        "session": "London" | "London+ext" | "NY",
         "profile": "EUR" | "XAU" | "CUSTOM",
         "entry": 1.16920,
         "sl": 1.16860,
@@ -21,13 +22,21 @@ v9.17 SCHEMA (what Pine sends in JSON):
         "swept": "AL" | "AH" | "LH" | "LL",
         "after_manipulation": false,
         "asia_wide": false,
-        "tf": "5m" or "5m 1m-V2",
-        # v9.17 NEW deep signal data:
-        "displacement_atr": 1.85,        # 1.85× ATR (T2: actual; T1: candle range as proxy)
-        "engulf_body_pct": 0.92,         # 92% body
-        "vol_spike": 1.34,               # 34% over 20-bar avg
-        "htf_aligned": true              # HTF bias matches direction
+        "tf": "5m" | "1m",
+        "tf_type": "5m" | "1m",          # v9.22: explicit timeframe type
+        "conflict_resolved": false,       # v9.22: HTF/LTF conflict was resolved
+        # v9.17 deep signal data (carried forward):
+        "displacement_atr": 1.85,
+        "engulf_body_pct": 0.92,
+        "vol_spike": 1.34,
+        "htf_aligned": true,
+        # v9.22 Pine-computed quality score (authoritative when present):
+        "quality_score": 82,              # int 0-100 (Pine computed)
+        "quality_grade": "A+"             # "A+", "B", "C" (Pine computed)
     }
+
+Priority: when quality_score is present (Pine computed), use it directly.
+          Fall back to Python scoring when quality_score is absent.
 """
 
 import re
@@ -36,23 +45,82 @@ from typing import Optional
 
 # ==================== MAIN EVALUATION FUNCTION ====================
 
+def _normalize_session(raw: str) -> str:
+    """Normalise session string for scoring. 'London+ext' → 'london', etc."""
+    s = raw.strip().lower()
+    if s.startswith("london"):
+        return "london"
+    if s.startswith("ny") or s.startswith("new york"):
+        return "ny"
+    if s.startswith("asia"):
+        return "asia"
+    return s
+
+
 def evaluate_signal(signal_data: dict) -> dict:
     """
-    Score a signal 0-10 based on v9.17 JSON fields.
+    Score a signal 0-10 based on v9.22 JSON fields.
+
+    v9.22 priority: when Pine sends quality_score (0-100) and quality_grade,
+    those are used directly as the authoritative score. Python scoring is the
+    fallback for older payloads or manual user messages.
 
     Returns: {
-        "score": 8.5,
-        "rating": "A+",
-        "explanation": "T2 AMD +3 | After manipulation +1.5 | RR 5.0 +2 | ...",
-        "reasons": [...]  # list of breakdown strings
+        "score": 8.2,          # 0-10 (normalised from Pine 0-100 when available)
+        "rating": "A+",        # "A+", "B", or "C"
+        "explanation": "...",
+        "reasons": [...],
+        "pine_scored": True    # True when Pine's quality_score was used
     }
     """
-    score = 0.0
     reasons = []
 
+    # ── v9.22: Pine authoritative score ──────────────────────────────────────
+    raw_pine_score = signal_data.get("quality_score")
+    raw_pine_grade = signal_data.get("quality_grade")
+
+    if raw_pine_score is not None:
+        try:
+            pine_score_100 = int(raw_pine_score)
+        except (ValueError, TypeError):
+            pine_score_100 = None
+
+        if pine_score_100 is not None:
+            score = round(pine_score_100 / 10.0, 1)   # 0-100 → 0-10
+            score = max(0.0, min(score, 10.0))
+
+            # Use Pine's grade if present; otherwise derive from normalised score
+            if raw_pine_grade in ("A+", "B", "C"):
+                rating = raw_pine_grade
+            else:
+                rating = "A+" if score >= 7.5 else ("B" if score >= 5.0 else "C")
+
+            reasons.append(f"Pine quality score: {pine_score_100}/100")
+
+            # Annotate conflict_resolved if flagged
+            if signal_data.get("conflict_resolved"):
+                reasons.append("✓ HTF/LTF conflict resolved")
+
+            # Annotate tf_type
+            tf_type = str(signal_data.get("tf_type", "")).lower()
+            if tf_type == "1m":
+                reasons.append("1m precision entry")
+            elif tf_type == "5m":
+                reasons.append("5m structure entry")
+
+            explanation = f"Pine score: {pine_score_100}/100 ({rating}). " + " | ".join(reasons)
+            return {
+                "score": score,
+                "rating": rating,
+                "explanation": explanation,
+                "reasons": reasons,
+                "pine_scored": True,
+            }
+
+    # ── Fallback: Python scoring (v9.17 and earlier / user messages) ─────────
+    score = 0.0
+
     # --- 1. TRADE TYPE QUALITY (0-3 points) ---
-    # T2 AMD is the safest (4-layer protected: sweep + displacement + retrace + PD touch)
-    # T1 2nd is safer than T1 1st (waits for stop-hunt)
     trade = str(signal_data.get("trade", "")).upper()
     if "T2" in trade and "AMD" in trade:
         score += 3
@@ -68,7 +136,6 @@ def evaluate_signal(signal_data: dict) -> dict:
         reasons.append("Generic T1/T2: +1.5")
 
     # --- 2. AFTER MANIPULATION BONUS (0-1.5 points) ---
-    # Stop-hunters already triggered — entry is safer
     if signal_data.get("after_manipulation") is True:
         score += 1.5
         reasons.append("After manipulation wick: +1.5")
@@ -94,7 +161,7 @@ def evaluate_signal(signal_data: dict) -> dict:
         reasons.append(f"RR {rr:.1f} (too low): +0")
 
     # --- 4. SESSION QUALITY (0-1 point) ---
-    session = str(signal_data.get("session", "")).strip().lower()
+    session = _normalize_session(str(signal_data.get("session", "")))
     if session == "london":
         score += 1
         reasons.append("London session: +1")
@@ -109,7 +176,8 @@ def evaluate_signal(signal_data: dict) -> dict:
 
     # --- 6. 1m PRECISION BONUS (0-0.5 points) ---
     tf = str(signal_data.get("tf", "")).lower()
-    if "1m" in tf or "{1m" in tf:
+    tf_type = str(signal_data.get("tf_type", "")).lower()
+    if tf_type == "1m" or "1m" in tf:
         score += 0.5
         reasons.append("1m precision entry: +0.5")
 
@@ -122,7 +190,7 @@ def evaluate_signal(signal_data: dict) -> dict:
         score += 0.3
         reasons.append(f"Asia level swept ({swept}): +0.3")
 
-    # --- 8. v9.17 DEEP DATA: ENGULF BODY % (0-0.5 points) ---
+    # --- 8. ENGULF BODY % (0-0.5 points) ---
     try:
         engulf_pct = float(signal_data.get("engulf_body_pct", 0) or 0)
     except (ValueError, TypeError):
@@ -137,7 +205,7 @@ def evaluate_signal(signal_data: dict) -> dict:
         score += 0.1
         reasons.append(f"Engulf {engulf_pct:.0%}: +0.1")
 
-    # --- 9. v9.17 DEEP DATA: VOLUME SPIKE (0-0.5 points) ---
+    # --- 9. VOLUME SPIKE (0-0.5 points) ---
     try:
         vol_spike = float(signal_data.get("vol_spike", 0) or 0)
     except (ValueError, TypeError):
@@ -149,15 +217,14 @@ def evaluate_signal(signal_data: dict) -> dict:
         score += 0.3
         reasons.append(f"Vol spike {vol_spike:.1f}×: +0.3")
 
-    # --- 10. v9.17 DEEP DATA: HTF ALIGNMENT (0-0.5 points) ---
+    # --- 10. HTF ALIGNMENT (0-0.5 points) ---
     if signal_data.get("htf_aligned") is True:
         score += 0.5
         reasons.append("HTF aligned: +0.5")
 
-    # --- CAP between 0-10 ---
-    score = max(0, min(score, 10))
+    # --- CAP and grade ---
+    score = max(0.0, min(score, 10.0))
 
-    # --- DETERMINE RATING ---
     if score >= 7.5:
         rating = "A+"
     elif score >= 5:
@@ -172,6 +239,7 @@ def evaluate_signal(signal_data: dict) -> dict:
         "rating": rating,
         "explanation": explanation,
         "reasons": reasons,
+        "pine_scored": False,
     }
 
 
