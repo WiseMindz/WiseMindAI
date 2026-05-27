@@ -16,7 +16,7 @@ from datetime import datetime
 import uvicorn
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 
 from config import (
     TELEGRAM_BOT_TOKEN,
@@ -56,7 +56,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-claude = Anthropic(api_key=CLAUDE_API_KEY)
+claude = AsyncAnthropic(api_key=CLAUDE_API_KEY)
 
 
 # ==================== SMART ROUTING ====================
@@ -231,7 +231,7 @@ async def claude_response(user_text: str, chat_id: int, username: str):
         messages = build_messages_for_claude(history, clean_text, username)
         logger.info(f"Routing → {model.split('-')[1].upper()} ({reason}) | tone={tone_label} | history={len(history)} msgs | input_len={len(clean_text)}")
         start = time.time()
-        response = claude.messages.create(
+        response = await claude.messages.create(
             model=model,
             max_tokens=max_tokens,
             system=full_system,
