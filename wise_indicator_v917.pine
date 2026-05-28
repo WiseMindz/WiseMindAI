@@ -414,11 +414,6 @@ var array<int>   mStatWins   = array.new_int(0)
 var array<int>   mStatLosses = array.new_int(0)
 var array<int>   mStatBE     = array.new_int(0)
 var array<float> mStatR      = array.new_float(0)
-var array<int>   yStatKeys   = array.new_int(0)
-var array<int>   yStatWins   = array.new_int(0)
-var array<int>   yStatLosses = array.new_int(0)
-var array<int>   yStatBE     = array.new_int(0)
-var array<float> yStatR      = array.new_float(0)
 
 if asiaEnded
     asiaEndBar := bar_index
@@ -3064,23 +3059,6 @@ checkOutcomeHit() =>
                 else if res == "BE"
                     array.set(mStatBE, mIdx, array.get(mStatBE, mIdx) + 1)
                 array.set(mStatR, mIdx, array.get(mStatR, mIdx) + rrAch)
-            // Update yearly stats
-            int yKey = year(time)
-            int yIdx = array.indexof(yStatKeys, yKey)
-            if yIdx == -1
-                array.push(yStatKeys, yKey)
-                array.push(yStatWins, res == "WIN" ? 1 : 0)
-                array.push(yStatLosses, res == "LOSS" ? 1 : 0)
-                array.push(yStatBE, res == "BE" ? 1 : 0)
-                array.push(yStatR, rrAch)
-            else
-                if res == "WIN"
-                    array.set(yStatWins, yIdx, array.get(yStatWins, yIdx) + 1)
-                else if res == "LOSS"
-                    array.set(yStatLosses, yIdx, array.get(yStatLosses, yIdx) + 1)
-                else if res == "BE"
-                    array.set(yStatBE, yIdx, array.get(yStatBE, yIdx) + 1)
-                array.set(yStatR, yIdx, array.get(yStatR, yIdx) + rrAch)
             // Draw result label on chart
             if showLabels
                 resultTxt = res == "WIN" ? "✅ TP +" + str.tostring(rrAch, "#.#") + "R" : res == "BE" ? "🔒 BE 0R" : "❌ SL -1R"
@@ -3693,33 +3671,9 @@ drawMonthlyStats(tbl) =>
         table.cell(tbl, 5, row, str.tostring(br, "#") + "%", text_color = color.orange, text_size = size.tiny)
         table.cell(tbl, 6, row, (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R", text_color = rCol, text_size = size.tiny)
         row += 1
-    // Yearly summary rows
-    int nYears = math.min(array.size(yStatKeys), 3)
-    if nYears > 0
-        color yrBg = color.new(#1565c0, 30)
-        for i = 0 to nYears - 1
-            int yIdx = array.size(yStatKeys) - 1 - i
-            int yK = array.get(yStatKeys, yIdx)
-            int yw = array.get(yStatWins, yIdx)
-            int yl = array.get(yStatLosses, yIdx)
-            int yb = array.get(yStatBE, yIdx)
-            float yr = array.get(yStatR, yIdx)
-            int yTotal = yw + yl + yb
-            float yWr = yTotal > 0 ? math.round(yw * 100.0 / yTotal) : 0.0
-            float yBr = yTotal > 0 ? math.round(yb * 100.0 / yTotal) : 0.0
-            color yWrCol = yWr >= 65 ? #00e676 : yWr >= 50 ? color.yellow : #ff1744
-            color yRCol = yr > 0 ? #00e676 : yr == 0 ? color.gray : #ff1744
-            table.cell(tbl, 0, row, "◆ " + str.tostring(yK), bgcolor = yrBg, text_color = color.white, text_size = size.tiny)
-            table.cell(tbl, 1, row, str.tostring(yw), bgcolor = yrBg, text_color = #00e676, text_size = size.tiny)
-            table.cell(tbl, 2, row, str.tostring(yl), bgcolor = yrBg, text_color = #ff1744, text_size = size.tiny)
-            table.cell(tbl, 3, row, str.tostring(yb), bgcolor = yrBg, text_color = color.orange, text_size = size.tiny)
-            table.cell(tbl, 4, row, str.tostring(yWr, "#") + "%", bgcolor = yrBg, text_color = yWrCol, text_size = size.tiny)
-            table.cell(tbl, 5, row, str.tostring(yBr, "#") + "%", bgcolor = yrBg, text_color = color.orange, text_size = size.tiny)
-            table.cell(tbl, 6, row, (yr >= 0 ? "+" : "") + str.tostring(yr, "#.#") + "R", bgcolor = yrBg, text_color = yRCol, text_size = size.tiny)
-            row += 1
 
 var table statsTable = table.new(position.bottom_right, 7, 12, bgcolor = color.new(color.black, 85), border_width = 1, border_color = color.new(color.white, 80))
-if showDashboard and barstate.islast and (array.size(mStatKeys) > 0 or array.size(yStatKeys) > 0)
+if showDashboard and barstate.islast and array.size(mStatKeys) > 0
     drawMonthlyStats(statsTable)
 
 // Chart sound on every fire (when at desk)
