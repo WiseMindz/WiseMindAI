@@ -408,6 +408,7 @@ var float  outcomeTP      = na
 var float  outcomeRR      = na
 var int    outcomeFireBar = na
 var bool   outcomeBEMoved = false
+var label  outcomeBELabel = na
 var array<int>   mStatKeys   = array.new_int(0)
 var array<int>   mStatWins   = array.new_int(0)
 var array<int>   mStatLosses = array.new_int(0)
@@ -3115,6 +3116,7 @@ anyFireForOutcome = fireLongAny or fireShortAny or fireT2LongAny or fireT2ShortA
 if anyFireForOutcome
     outcomeActive  := true
     outcomeBEMoved := false
+    outcomeBELabel := na
     outcomeEntry   := close
     outcomeFireBar := bar_index
     outcomeDir  := oDir
@@ -3133,12 +3135,16 @@ if outcomeActive and not outcomeBEMoved and enableBEMove and bar_index > outcome
         outcomeSL      := outcomeEntry
         outcomeBEMoved := true
         if showLabels
-            label.new(bar_index, outcomeEntry, "🔒 BE", color = color.new(color.orange, 30), textcolor = color.white, style = outcomeDir == "LONG" ? label.style_label_up : label.style_label_down, size = size.tiny)
+            outcomeBELabel := label.new(bar_index, outcomeEntry, "🔒 SL→BE", color = color.new(color.orange, 30), textcolor = color.white, style = outcomeDir == "LONG" ? label.style_label_up : label.style_label_down, size = size.tiny)
 
 // --- Detect outcome (main body: minimal) ---
 [outcomeHit, outcomeResult, outcomeExitPrice, outcomeRRAchieved] = checkOutcomeHit()
 if outcomeHit
     outcomeActive := false
+    // Remove BE status label if trade ended as WIN (TP hit after BE move)
+    if outcomeResult == "WIN" and not na(outcomeBELabel)
+        label.delete(outcomeBELabel)
+        outcomeBELabel := na
 
 // =============================================================================
 // LIVE WATCH PANEL
