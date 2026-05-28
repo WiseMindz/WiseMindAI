@@ -67,7 +67,7 @@ webhookSecret = "wisemind2026"
 // SYMBOL AUTO-PROFILE (v9.14) — Auto-tunes for EURUSD vs XAUUSD
 // =============================================================================
 gSymbol = "◆ Symbol Auto-Profile (v9.14)"
-autoDetectProfile = input.bool(true, "Auto-detect symbol profile", group = gSymbol, tooltip = "When ON: indicator reads syminfo.ticker and applies preset values for EURUSD or XAUUSD automatically. Symbol auto-detection: tickers containing 'EURUSD' use EUR profile, tickers containing 'XAUUSD' or 'GOLD' or 'XAU' use XAU profile, anything else uses Custom (your manual values below). When OFF: all values use the manual settings exactly as you set them, regardless of symbol.")
+autoDetectProfile = input.bool(true, "Auto-detect symbol profile", group = gSymbol, tooltip = "ON: auto-detects EURUSD/XAUUSD/GOLD from ticker and applies preset values. Anything else uses Custom. OFF: uses your manual settings regardless of symbol.")
 profileOverride = input.string("Auto", "Override profile (if auto-detect misses)", options = ["Auto", "Force EURUSD", "Force XAUUSD", "Custom (use my manual values)"], group = gSymbol, tooltip = "Use this if your broker names symbols unusually (e.g. 'XAUUSDx' or 'GOLD/USD'). 'Auto' = use syminfo.ticker detection. 'Force EURUSD/XAUUSD' = always use that profile regardless of symbol. 'Custom' = ignore profiles entirely, use manual values below.")
 
 // Auto-detect logic
@@ -108,7 +108,7 @@ oneMinT2BodyRatio = input.float(0.85, "1m Min Engulf Body % (T2)", minval = 0.50
 oneMinSlSrc = input.string("Use Smart SL Chain (same as 5m)", "1m Fire SL Source", options = ["1m engulf low/high (tighter, best RR)", "5m engulf low/high (safer, wider)", "Use Smart SL Chain (same as 5m)"], group = gLogicTF, tooltip = "When 1m fires the trade, which low/high should SL use? 1m = tightest. 5m = wider but safer. Smart SL = full fallback chain.")
 
 // v9.19: Vol Confirm mode for 1m fires (FIXES the v9.18 bug where Variant 2 skipped vol check entirely)
-oneMinVolConfirmMode = input.string("Off — no vol confirm on 1m fires (legacy v9.18 V2)", "1m Vol Confirm Mode (v9.19)", options = ["Strict — 1m engulf candle must pass vol threshold", "5m Partial — forming 5m bar must pass vol threshold", "Off — no vol confirm on 1m fires (legacy v9.18 V2)"], group = gLogicTF, tooltip = "v9.19 BUG FIX: In v9.18 and earlier, Variant 2 1m fires SKIPPED Vol Confirm entirely (trades fired below threshold). Strict (recommended) = the 1m engulf candle itself must beat your Vol Confirm setting. 5m Partial = the forming 5m bar's vol must beat threshold (looser, but matches V1 behaviour). Off = preserves old buggy behaviour for backtest comparison.")
+oneMinVolConfirmMode = input.string("Off — no vol confirm on 1m fires (legacy v9.18 V2)", "1m Vol Confirm Mode (v9.19)", options = ["Strict — 1m engulf candle must pass vol threshold", "5m Partial — forming 5m bar must pass vol threshold", "Off — no vol confirm on 1m fires (legacy v9.18 V2)"], group = gLogicTF, tooltip = "Strict = 1m candle must pass vol threshold. 5m Partial = forming 5m bar must pass. Off = no vol confirm on 1m fires (legacy).")
 oneMinVolStrict   = oneMinVolConfirmMode == "Strict — 1m engulf candle must pass vol threshold"
 oneMinVolPartial  = oneMinVolConfirmMode == "5m Partial — forming 5m bar must pass vol threshold"
 oneMinVolOff      = oneMinVolConfirmMode == "Off — no vol confirm on 1m fires (legacy v9.18 V2)"
@@ -353,7 +353,7 @@ beThresholdR = input.float(1.5, "BE Trigger (R in profit)", minval = 0.5, maxval
 // PHONE ALERTS GROUP (v9.12)
 // =============================================================================
 gAlerts = "◆ Phone Alerts (v9.12)"
-enablePhoneAlerts = input.bool(true, "Enable rich phone alerts", group = gAlerts, tooltip = "Master toggle. When ON, every trade fire emits an alert() with full message: symbol, side, entry, SL, TP, RR, source, warnings. REQUIRES TradingView Pro+ for push notifications. After enabling, set up ONE alert in TradingView: right-click chart → Add Alert → Condition: 'WMFx KZ v9.13 → Any alert() function call' → Notifications: Push notifications + App.")
+enablePhoneAlerts = input.bool(true, "Enable rich phone alerts", group = gAlerts, tooltip = "ON: every fire emits alert() with symbol, side, entry, SL, TP, RR. Requires Pro+ for push. Set alert: Any alert() function call → Push notifications.")
 alertOn5m = input.bool(true, "Alert on 5m fires", group = gAlerts, tooltip = "Send alert when a 5m logic-TF fire happens (London or NY, T1 or T2). Tag in alert message: [5m].")
 alertOn1m = input.bool(true, "Alert on 1m precision fires", group = gAlerts, tooltip = "Send alert when a 1m precision fire happens (London or NY, T1 or T2). Tag in alert message: {1m-V1} or {1m-V2}. Set up as a SEPARATE TradingView alert if you want different sound/routing for 1m vs 5m.")
 playChartSound = input.bool(true, "Play chart sound on fire (when at desk)", group = gAlerts, tooltip = "Plays an audible chart sound when any fire happens, in addition to the phone push. Useful when you're at the desk and want to be notified without checking phone.")
