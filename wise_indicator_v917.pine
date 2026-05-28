@@ -1,62 +1,6 @@
 //@version=6
-// =============================================================================
-// Wise Indicator v9.20 — DAILY RESET BUG FIX + COMPACT LABELS + NEW DEFAULTS
-// =============================================================================
-// v9.20 BUG FIXES + UPGRADES (over v9.19):
-//
-// 🔴 CRITICAL BUG FIX — STALE SESSION HIGH/LOW BLEEDING ACROSS DAYS:
-//   In v9.19 and earlier, `londonHigh`, `londonLow`, `asiaHigh`, `asiaLow` and
-//   `londonEndBar` were declared as `var float` (persistent across bars) and
-//   were ONLY reset when the next session began (e.g. `asiaStarted`).
-//
-//   This caused YESTERDAY'S London H/L to live in those variables during the
-//   16+ hour gap until next London started. The sweep detector on line 1685
-//   used `not inLondon and not na(londonEndBar) and bar_index > londonEndBar`
-//   to gate detection — but `londonEndBar` from yesterday was still set, so:
-//
-//   Yesterday 05:15 London close → londonHigh stays at e.g. 1.1750
-//   Asia start (22:00) → sweep flags reset to false, but H/L values STAY
-//   Asia bar wicks above 1.1750 → false "London H swept" detected
-//   Next NY engine → sees londonHighSweptToday=true, FIRES WITHOUT real sweep
-//
-//   FIX: At every `asiaStarted` (start of new trading day):
-//     - Reset londonHigh, londonLow to na
-//     - Reset asiaHigh, asiaLow to na (defence in depth)
-//     - Reset londonEndBar to na (so canDetectLondonSweep gates correctly)
-//     - Already-reset: sweep flags, signal counters, session-taken flags
-//
-//   This was the root cause of the false NY shorts you observed without a
-//   visible London sweep — NY was acting on yesterday's stale level.
-//
-// 🆕 COMPACT ENTRY LABELS (v9.20):
-//   Entry labels are now rendered with text_size=tiny and 50% transparent
-//   background. Same info, much less screen real estate. Existing
-//   `showQualityScore` badge still works.
-//
-// 🆕 USER-PREFERRED DEFAULTS (v9.20):
-//   Based on optimal settings from production testing:
-//     - SL Buffer (ticks): 5 → 10
-//     - SL Swing Lookback: 20 → 16
-//     - SL Min Distance (× ATR): 0.5 → 0.4
-//     - Show SL source in label: ON (was already)
-//     - Show SL/TP Boxes: ON
-//     - Show Weak/Intermediate/Strong H/L lines: OFF (all 3)
-//     - Setup alive for entire London (+buffer): ON
-//     - Max distance from swept level (× ATR): 1
-//     - Asia Sweep Color: red (47% opacity)
-//     - London Sweep Color: blue (58% opacity)
-//     - Sweep PDH/PDL, PWH/PWL: OFF (avoid stale daily/weekly noise)
-//     - Sweep must close BACK through level: OFF
-//     - Max bars after Asia to look for sweep: 100
-//     - London Entry Mode: Auto (smart decide based on conditions)
-//     - NY Entry Mode (T1): Auto (smart decide based on conditions)
-//     - NY accepts Asia High sweep: ON
-//
-// All v9.19 features intact: Vol Confirm fix, A+ Quality Gate, deep JSON,
-// symbol auto-profile, NY engine, separate sweep colors, etc.
-// =============================================================================
-
-indicator("Wise Indicator v9.22", "Wise v9.22", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+// Wise Indicator v9.23 — Trade outcome tracking, SL→BE, monthly/yearly stats
+indicator("Wise Indicator v9.23", "Wise v9.23", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 // =============================================================================
 // WEBHOOK JSON ALERTS (hardcoded — hidden from settings)
 // =============================================================================
@@ -161,18 +105,7 @@ enableBiasFilter = input.bool(true, "Apply bias filter to T1 and T2", group = gB
 // =============================================================================
 // A+ QUALITY GATE (v9.19) — Resolves T1 vs T2 conflicts on same sweep
 // =============================================================================
-// Quality Gate — hardcoded (settings removed to save compiled tokens)
-conflictMode = "First wins (legacy v9.18 behaviour)"
-qualityMinScore = 6
-qualityWaitBars = 3
-wHtfAligned = 3
-wBodyStrong = 2
-wVolStrong  = 2
-wManipPassed = 2
-wDisplaceStrong = 2
-wPdDeep = 2
-wRrStrong = 2
-wAsiaWidePenalty = 2
+// Quality Gate removed — "First wins" mode (all valid fires pass through)
 
 // =============================================================================
 // NY ENGINE (v9.8)
@@ -2902,114 +2835,11 @@ if (fireLong or fireShort or fireT2Long or fireT2Short) and not (fireLong1m or f
 // =============================================================================
 // A+ QUALITY GATE (v9.19) — CONSOLIDATED FUNCTIONS
 // =============================================================================
-// All scoring + gating logic wrapped in functions to keep main body under
-// Pine's CE10295 limit ("main body too long"). Each function returns a tuple
-// or scalar; main body has only 1-2 calls.
-// =============================================================================
-
-// Score helpers — each accesses script-scope globals directly (Pine v6 allows this)
-scoreT1Long(bool fire) =>
-    if not fire
-        -99
-    else
-        int s = 0
-        s += htfAllowsLong ? wHtfAligned : 0
-        s += bullBodyPct >= 0.90 ? wBodyStrong : (bullBodyPct >= minBodyRatio ? 1 : 0)
-        s += effVolMult >= 1.5 ? wVolStrong : (effVolMult >= volConfirmMult ? 1 : 0)
-        s += fireLong2nd ? wManipPassed : 0
-        s += longActualRR >= 4.0 ? wRrStrong : (longActualRR >= 3.0 ? 1 : 0)
-        s -= asiaTooWide ? wAsiaWidePenalty : 0
-        s
-
-scoreT1Short(bool fire) =>
-    if not fire
-        -99
-    else
-        int s = 0
-        s += htfAllowsShort ? wHtfAligned : 0
-        s += bearBodyPct >= 0.90 ? wBodyStrong : (bearBodyPct >= minBodyRatio ? 1 : 0)
-        s += effVolMult >= 1.5 ? wVolStrong : (effVolMult >= volConfirmMult ? 1 : 0)
-        s += fireShort2nd ? wManipPassed : 0
-        s += shortActualRR >= 4.0 ? wRrStrong : (shortActualRR >= 3.0 ? 1 : 0)
-        s -= asiaTooWide ? wAsiaWidePenalty : 0
-        s
-
-scoreT2Long(bool fire) =>
-    if not fire
-        -99
-    else
-        int s = 0
-        s += htfAllowsLong ? wHtfAligned : 0
-        s += bullBodyPct >= 0.85 ? wBodyStrong : (bullBodyPct >= t2BodyRatio ? 1 : 0)
-        s += effVolMult >= 1.5 ? wVolStrong : (effVolMult >= volConfirmMult ? 1 : 0)
-        t2LongDispAtr = atr14 > 0 and not na(sweptLongLevel) and not na(t2LongMaxDown) ? (t2LongMaxDown - sweptLongLevel) / atr14 : 0.0
-        s += t2LongDispAtr >= 2.0 ? wDisplaceStrong : (t2LongDispAtr >= t2DisplaceAtr ? 1 : 0)
-        pdDeepL = not na(t2LongTargetZoneTop) and not na(t2LongTargetZoneBot) and (t2LongTargetZoneTop > t2LongTargetZoneBot) and (low - t2LongTargetZoneBot) / (t2LongTargetZoneTop - t2LongTargetZoneBot) <= 0.30
-        s += pdDeepL ? wPdDeep : 0
-        s += t2LongRR >= 4.0 ? wRrStrong : (t2LongRR >= 3.0 ? 1 : 0)
-        s -= asiaTooWide ? math.round(wAsiaWidePenalty / 2) : 0
-        s
-
-scoreT2Short(bool fire) =>
-    if not fire
-        -99
-    else
-        int s = 0
-        s += htfAllowsShort ? wHtfAligned : 0
-        s += bearBodyPct >= 0.85 ? wBodyStrong : (bearBodyPct >= t2BodyRatio ? 1 : 0)
-        s += effVolMult >= 1.5 ? wVolStrong : (effVolMult >= volConfirmMult ? 1 : 0)
-        t2ShortDispAtr = atr14 > 0 and not na(sweptShortLevel) and not na(t2ShortMaxUp) ? (sweptShortLevel - t2ShortMaxUp) / atr14 : 0.0
-        s += t2ShortDispAtr >= 2.0 ? wDisplaceStrong : (t2ShortDispAtr >= t2DisplaceAtr ? 1 : 0)
-        pdDeepS = not na(t2ShortTargetZoneTop) and not na(t2ShortTargetZoneBot) and (t2ShortTargetZoneTop > t2ShortTargetZoneBot) and (t2ShortTargetZoneTop - high) / (t2ShortTargetZoneTop - t2ShortTargetZoneBot) <= 0.30
-        s += pdDeepS ? wPdDeep : 0
-        s += t2ShortRR >= 4.0 ? wRrStrong : (t2ShortRR >= 3.0 ? 1 : 0)
-        s -= asiaTooWide ? math.round(wAsiaWidePenalty / 2) : 0
-        s
-
-// Master gate — computes raw flags, scores, and gating in one shot
-// Returns: gated 4 flags + bestScore + conflictResolved + activeFlags + raw 4 flags
-runQualityGate(string mode, int minScore) =>
-    rawL   = fireLong or fireLong1m or fireNyLong or fireNyLong1m
-    rawS   = fireShort or fireShort1m or fireNyShort or fireNyShort1m
-    rawT2L = fireT2Long or fireT2Long1m or fireNyT2Long or fireNyT2Long1m
-    rawT2S = fireT2Short or fireT2Short1m or fireNyT2Short or fireNyT2Short1m
-    bool isQ = mode == "A+ Quality Gate (rank both, fire best)"
-    bool isP = mode == "T1 Priority (block opposite-direction T2)"
-    int sL = scoreT1Long(rawL)
-    int sS = scoreT1Short(rawS)
-    int sT2L = scoreT2Long(rawT2L)
-    int sT2S = scoreT2Short(rawT2S)
-    int best = math.max(math.max(sL, sS), math.max(sT2L, sT2S))
-    bool gL = rawL
-    bool gS = rawS
-    bool gT2L = rawT2L
-    bool gT2S = rawT2S
-    if isQ
-        if best < minScore
-            gL := false
-            gS := false
-            gT2L := false
-            gT2S := false
-        else
-            anyConflict = (rawL ? 1 : 0) + (rawS ? 1 : 0) + (rawT2L ? 1 : 0) + (rawT2S ? 1 : 0) > 1
-            if anyConflict
-                gL := sL == best
-                gS := sS == best and not gL
-                gT2L := sT2L == best and not gL and not gS
-                gT2S := sT2S == best and not gL and not gS and not gT2L
-    else if isP
-        if rawL and rawT2S
-            gT2S := false
-        if rawS and rawT2L
-            gT2L := false
-    rawCount = (rawL ? 1 : 0) + (rawS ? 1 : 0) + (rawT2L ? 1 : 0) + (rawT2S ? 1 : 0)
-    gatedCount = (gL ? 1 : 0) + (gS ? 1 : 0) + (gT2L ? 1 : 0) + (gT2S ? 1 : 0)
-    bool resolved = (isQ or isP) and rawCount > gatedCount
-    bool anyRaw = rawL or rawS or rawT2L or rawT2S
-    [gL, gS, gT2L, gT2S, best, resolved, isQ, isP, anyRaw]
-
-// === Single call from main body (minimal expressions) ===
-[fireLongAny, fireShortAny, fireT2LongAny, fireT2ShortAny, bestScore, conflictResolvedNow, modeQualityGate, modeT1Priority, anyRawFire] = runQualityGate(conflictMode, qualityMinScore)
+// Fire aggregation — "First wins" mode: all valid fires pass through directly
+fireLongAny    = fireLong or fireLong1m or fireNyLong or fireNyLong1m
+fireShortAny   = fireShort or fireShort1m or fireNyShort or fireNyShort1m
+fireT2LongAny  = fireT2Long or fireT2Long1m or fireNyT2Long or fireNyT2Long1m
+fireT2ShortAny = fireT2Short or fireT2Short1m or fireNyT2Short or fireNyT2Short1m
 
 // =============================================================================
 // SL OVERRIDE FOR 1M FIRES (v9.7)
