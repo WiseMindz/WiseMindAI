@@ -349,11 +349,15 @@ def format_result_telegram_message(data: dict, save_info: dict, monthly: list) -
         msg += "\n📊 <b>Monthly Stats:</b>\n"
         for m in monthly[-3:]:  # Last 3 months
             wr = m["win_rate"]
+            be = m.get("be_count", 0)
+            be_rate = m.get("be_rate", 0.0)
             wr_emoji = "🟢" if wr >= 65 else ("🟡" if wr >= 50 else "🔴")
+            be_txt = f" / {be}BE" if be > 0 else ""
+            be_pct = f" | 🔒{be_rate}%" if be > 0 else ""
             msg += (
                 f"  {m['month']} {m['year']}: "
-                f"{m['wins']}W / {m['losses']}L "
-                f"({wr_emoji} {wr}%) "
+                f"{m['wins']}W / {m['losses']}L{be_txt} "
+                f"({wr_emoji} {wr}%{be_pct}) "
                 f"| {m['total_r']:+.1f}R\n"
             )
 

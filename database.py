@@ -255,6 +255,7 @@ async def get_monthly_stats(months: int = 6) -> List[dict]:
                 strftime('%m', timestamp) AS month,
                 SUM(CASE WHEN result = 'WIN' THEN 1 ELSE 0 END) AS wins,
                 SUM(CASE WHEN result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+                SUM(CASE WHEN result = 'BE' THEN 1 ELSE 0 END) AS be_count,
                 COUNT(*) AS total,
                 ROUND(SUM(rr_achieved), 2) AS total_r
             FROM trade_results
@@ -267,8 +268,9 @@ async def get_monthly_stats(months: int = 6) -> List[dict]:
     # Returnera i kronologisk ordning (äldsta först)
     stats = []
     for row in reversed(rows):
-        year, month, wins, losses, total, total_r = row
+        year, month, wins, losses, be_count, total, total_r = row
         win_rate = round((wins / total) * 100, 1) if total > 0 else 0.0
+        be_rate = round((be_count / total) * 100, 1) if total > 0 else 0.0
         month_names = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         stats.append({
@@ -276,8 +278,10 @@ async def get_monthly_stats(months: int = 6) -> List[dict]:
             "year": int(year),
             "wins": wins,
             "losses": losses,
+            "be_count": be_count,
             "total": total,
             "win_rate": win_rate,
+            "be_rate": be_rate,
             "total_r": total_r or 0.0,
         })
     return stats

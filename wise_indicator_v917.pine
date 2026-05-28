@@ -478,10 +478,12 @@ var bool   outcomeBEMoved = false
 var array<int>   mStatKeys   = array.new_int(0)
 var array<int>   mStatWins   = array.new_int(0)
 var array<int>   mStatLosses = array.new_int(0)
+var array<int>   mStatBE     = array.new_int(0)
 var array<float> mStatR      = array.new_float(0)
 var array<int>   yStatKeys   = array.new_int(0)
 var array<int>   yStatWins   = array.new_int(0)
 var array<int>   yStatLosses = array.new_int(0)
+var array<int>   yStatBE     = array.new_int(0)
 var array<float> yStatR      = array.new_float(0)
 
 if asiaEnded
@@ -3221,12 +3223,15 @@ checkOutcomeHit() =>
                 array.push(mStatKeys, mKey)
                 array.push(mStatWins, res == "WIN" ? 1 : 0)
                 array.push(mStatLosses, res == "LOSS" ? 1 : 0)
+                array.push(mStatBE, res == "BE" ? 1 : 0)
                 array.push(mStatR, rrAch)
             else
                 if res == "WIN"
                     array.set(mStatWins, mIdx, array.get(mStatWins, mIdx) + 1)
                 else if res == "LOSS"
                     array.set(mStatLosses, mIdx, array.get(mStatLosses, mIdx) + 1)
+                else if res == "BE"
+                    array.set(mStatBE, mIdx, array.get(mStatBE, mIdx) + 1)
                 array.set(mStatR, mIdx, array.get(mStatR, mIdx) + rrAch)
             // Update yearly stats
             int yKey = year(time)
@@ -3235,12 +3240,15 @@ checkOutcomeHit() =>
                 array.push(yStatKeys, yKey)
                 array.push(yStatWins, res == "WIN" ? 1 : 0)
                 array.push(yStatLosses, res == "LOSS" ? 1 : 0)
+                array.push(yStatBE, res == "BE" ? 1 : 0)
                 array.push(yStatR, rrAch)
             else
                 if res == "WIN"
                     array.set(yStatWins, yIdx, array.get(yStatWins, yIdx) + 1)
                 else if res == "LOSS"
                     array.set(yStatLosses, yIdx, array.get(yStatLosses, yIdx) + 1)
+                else if res == "BE"
+                    array.set(yStatBE, yIdx, array.get(yStatBE, yIdx) + 1)
                 array.set(yStatR, yIdx, array.get(yStatR, yIdx) + rrAch)
             // Draw result label on chart
             if showLabels
@@ -3819,8 +3827,10 @@ drawMonthlyStats(tbl) =>
     table.cell(tbl, 0, 0, "◆ Period", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
     table.cell(tbl, 1, 0, "W", bgcolor = hdrBg, text_color = #00e676, text_size = size.tiny)
     table.cell(tbl, 2, 0, "L", bgcolor = hdrBg, text_color = #ff1744, text_size = size.tiny)
-    table.cell(tbl, 3, 0, "WR%", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 4, 0, "R", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 3, 0, "BE", bgcolor = hdrBg, text_color = color.orange, text_size = size.tiny)
+    table.cell(tbl, 4, 0, "WR%", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 5, 0, "BE%", bgcolor = hdrBg, text_color = color.orange, text_size = size.tiny)
+    table.cell(tbl, 6, 0, "R", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
     int nRows = math.min(array.size(mStatKeys), 6)
     int row = 1
     // Monthly rows
@@ -3832,16 +3842,20 @@ drawMonthlyStats(tbl) =>
         string mName = monthStr(mM) + " " + str.tostring(mY)
         int w = array.get(mStatWins, idx)
         int l = array.get(mStatLosses, idx)
+        int b = array.get(mStatBE, idx)
         float r = array.get(mStatR, idx)
-        int total = w + l
+        int total = w + l + b
         float wr = total > 0 ? math.round(w * 100.0 / total) : 0.0
+        float br = total > 0 ? math.round(b * 100.0 / total) : 0.0
         color wrCol = wr >= 65 ? #00e676 : wr >= 50 ? color.yellow : #ff1744
         color rCol = r > 0 ? #00e676 : r == 0 ? color.gray : #ff1744
         table.cell(tbl, 0, row, mName, text_color = color.white, text_size = size.tiny)
         table.cell(tbl, 1, row, str.tostring(w), text_color = #00e676, text_size = size.tiny)
         table.cell(tbl, 2, row, str.tostring(l), text_color = #ff1744, text_size = size.tiny)
-        table.cell(tbl, 3, row, str.tostring(wr, "#") + "%", text_color = wrCol, text_size = size.tiny)
-        table.cell(tbl, 4, row, (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R", text_color = rCol, text_size = size.tiny)
+        table.cell(tbl, 3, row, str.tostring(b), text_color = color.orange, text_size = size.tiny)
+        table.cell(tbl, 4, row, str.tostring(wr, "#") + "%", text_color = wrCol, text_size = size.tiny)
+        table.cell(tbl, 5, row, str.tostring(br, "#") + "%", text_color = color.orange, text_size = size.tiny)
+        table.cell(tbl, 6, row, (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R", text_color = rCol, text_size = size.tiny)
         row += 1
     // Yearly summary rows
     int nYears = math.min(array.size(yStatKeys), 3)
@@ -3852,19 +3866,23 @@ drawMonthlyStats(tbl) =>
             int yK = array.get(yStatKeys, yIdx)
             int yw = array.get(yStatWins, yIdx)
             int yl = array.get(yStatLosses, yIdx)
+            int yb = array.get(yStatBE, yIdx)
             float yr = array.get(yStatR, yIdx)
-            int yTotal = yw + yl
+            int yTotal = yw + yl + yb
             float yWr = yTotal > 0 ? math.round(yw * 100.0 / yTotal) : 0.0
+            float yBr = yTotal > 0 ? math.round(yb * 100.0 / yTotal) : 0.0
             color yWrCol = yWr >= 65 ? #00e676 : yWr >= 50 ? color.yellow : #ff1744
             color yRCol = yr > 0 ? #00e676 : yr == 0 ? color.gray : #ff1744
             table.cell(tbl, 0, row, "◆ " + str.tostring(yK), bgcolor = yrBg, text_color = color.white, text_size = size.tiny)
             table.cell(tbl, 1, row, str.tostring(yw), bgcolor = yrBg, text_color = #00e676, text_size = size.tiny)
             table.cell(tbl, 2, row, str.tostring(yl), bgcolor = yrBg, text_color = #ff1744, text_size = size.tiny)
-            table.cell(tbl, 3, row, str.tostring(yWr, "#") + "%", bgcolor = yrBg, text_color = yWrCol, text_size = size.tiny)
-            table.cell(tbl, 4, row, (yr >= 0 ? "+" : "") + str.tostring(yr, "#.#") + "R", bgcolor = yrBg, text_color = yRCol, text_size = size.tiny)
+            table.cell(tbl, 3, row, str.tostring(yb), bgcolor = yrBg, text_color = color.orange, text_size = size.tiny)
+            table.cell(tbl, 4, row, str.tostring(yWr, "#") + "%", bgcolor = yrBg, text_color = yWrCol, text_size = size.tiny)
+            table.cell(tbl, 5, row, str.tostring(yBr, "#") + "%", bgcolor = yrBg, text_color = color.orange, text_size = size.tiny)
+            table.cell(tbl, 6, row, (yr >= 0 ? "+" : "") + str.tostring(yr, "#.#") + "R", bgcolor = yrBg, text_color = yRCol, text_size = size.tiny)
             row += 1
 
-var table statsTable = table.new(position.bottom_right, 5, 12, bgcolor = color.new(color.black, 85), border_width = 1, border_color = color.new(color.white, 80))
+var table statsTable = table.new(position.bottom_right, 7, 12, bgcolor = color.new(color.black, 85), border_width = 1, border_color = color.new(color.white, 80))
 if showDashboard and barstate.islast and (array.size(mStatKeys) > 0 or array.size(yStatKeys) > 0)
     drawMonthlyStats(statsTable)
 
