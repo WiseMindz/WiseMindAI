@@ -58,11 +58,10 @@
 
 indicator("Wise Indicator v9.22", "Wise v9.22", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 // =============================================================================
-// WEBHOOK JSON ALERTS (v9.15)
+// WEBHOOK JSON ALERTS (hardcoded — hidden from settings)
 // =============================================================================
-gWebhook = "◆ Webhook JSON Alerts (v9.15)"
-enableJsonAlerts = input.bool(true, "Send JSON to webhook (instead of plain text)", group = gWebhook, tooltip = "When ON: alert() calls emit JSON formatted for FastAPI webhook receiver. When OFF: emits plain text (legacy v9.14 behavior).")
-webhookSecret = input.string("wisemind2026", "Webhook secret (must match .env)", group = gWebhook, tooltip = "Must match WEBHOOK_SECRET in your bot's .env file. The webhook handler rejects requests with wrong secret.")
+enableJsonAlerts = true
+webhookSecret = "wisemind2026"
 
 // =============================================================================
 // SYMBOL AUTO-PROFILE (v9.14) — Auto-tunes for EURUSD vs XAUUSD
@@ -105,11 +104,11 @@ logicTF = input.timeframe("15", "Logic Timeframe", options = ["1", "3", "5", "15
 enable1mFire = input.bool(true, "Enable 1m Precision Fire (when chart is 1m)", group = gLogicTF, tooltip = "When ON and chart TF < Logic TF: fire trades on 1m engulfing candles inside active 5m setups. When chart TF >= Logic TF: this has no effect (regular engine fires).")
 fireVariant = input.string("Variant 2 — Independent (fire on any strong 1m engulf in active setup)", "1m Fire Variant", options = ["Variant 1 — Synchronized (1m fires only when 5m would also fire)", "Variant 2 — Independent (fire on any strong 1m engulf in active setup)"], group = gLogicTF, tooltip = "Variant 1 = same trades as 5m, just earlier price. Variant 2 = more signals, faster fires, slightly noisier.")
 oneMinBodyRatio = input.float(0.85, "1m Min Engulf Body % (T1)", minval = 0.50, maxval = 0.95, step = 0.05, group = gLogicTF, tooltip = "Body % required for 1m engulf to fire T1. Same as 5m default to keep quality consistent.")
-oneMinT2BodyRatio = input.float(0.80, "1m Min Engulf Body % (T2)", minval = 0.50, maxval = 0.95, step = 0.05, group = gLogicTF, tooltip = "Body % required for 1m engulf to fire T2.")
-oneMinSlSrc = input.string("1m engulf low/high (tighter, best RR)", "1m Fire SL Source", options = ["1m engulf low/high (tighter, best RR)", "5m engulf low/high (safer, wider)", "Use Smart SL Chain (same as 5m)"], group = gLogicTF, tooltip = "When 1m fires the trade, which low/high should SL use? 1m = tightest. 5m = wider but safer. Smart SL = full fallback chain.")
+oneMinT2BodyRatio = input.float(0.85, "1m Min Engulf Body % (T2)", minval = 0.50, maxval = 0.95, step = 0.05, group = gLogicTF, tooltip = "Body % required for 1m engulf to fire T2.")
+oneMinSlSrc = input.string("Use Smart SL Chain (same as 5m)", "1m Fire SL Source", options = ["1m engulf low/high (tighter, best RR)", "5m engulf low/high (safer, wider)", "Use Smart SL Chain (same as 5m)"], group = gLogicTF, tooltip = "When 1m fires the trade, which low/high should SL use? 1m = tightest. 5m = wider but safer. Smart SL = full fallback chain.")
 
 // v9.19: Vol Confirm mode for 1m fires (FIXES the v9.18 bug where Variant 2 skipped vol check entirely)
-oneMinVolConfirmMode = input.string("Strict — 1m engulf candle must pass vol threshold", "1m Vol Confirm Mode (v9.19)", options = ["Strict — 1m engulf candle must pass vol threshold", "5m Partial — forming 5m bar must pass vol threshold", "Off — no vol confirm on 1m fires (legacy v9.18 V2)"], group = gLogicTF, tooltip = "v9.19 BUG FIX: In v9.18 and earlier, Variant 2 1m fires SKIPPED Vol Confirm entirely (trades fired below threshold). Strict (recommended) = the 1m engulf candle itself must beat your Vol Confirm setting. 5m Partial = the forming 5m bar's vol must beat threshold (looser, but matches V1 behaviour). Off = preserves old buggy behaviour for backtest comparison.")
+oneMinVolConfirmMode = input.string("Off — no vol confirm on 1m fires (legacy v9.18 V2)", "1m Vol Confirm Mode (v9.19)", options = ["Strict — 1m engulf candle must pass vol threshold", "5m Partial — forming 5m bar must pass vol threshold", "Off — no vol confirm on 1m fires (legacy v9.18 V2)"], group = gLogicTF, tooltip = "v9.19 BUG FIX: In v9.18 and earlier, Variant 2 1m fires SKIPPED Vol Confirm entirely (trades fired below threshold). Strict (recommended) = the 1m engulf candle itself must beat your Vol Confirm setting. 5m Partial = the forming 5m bar's vol must beat threshold (looser, but matches V1 behaviour). Off = preserves old buggy behaviour for backtest comparison.")
 oneMinVolStrict   = oneMinVolConfirmMode == "Strict — 1m engulf candle must pass vol threshold"
 oneMinVolPartial  = oneMinVolConfirmMode == "5m Partial — forming 5m bar must pass vol threshold"
 oneMinVolOff      = oneMinVolConfirmMode == "Off — no vol confirm on 1m fires (legacy v9.18 V2)"
@@ -163,8 +162,8 @@ enableBiasFilter = input.bool(true, "Apply bias filter to T1 and T2", group = gB
 // A+ QUALITY GATE (v9.19) — Resolves T1 vs T2 conflicts on same sweep
 // =============================================================================
 gQuality = "◆ A+ Quality Gate (v9.19)"
-conflictMode = input.string("A+ Quality Gate (rank both, fire best)", "T1/T2 Conflict Mode", options = ["A+ Quality Gate (rank both, fire best)", "T1 Priority (block opposite-direction T2)", "First wins (legacy v9.18 behaviour)"], group = gQuality, tooltip = "When BOTH T1 and T2 setups are valid on the same sweep (e.g. T1 LONG + T2 SHORT after AL sweep), how to resolve:\n\n• A+ Quality Gate (RECOMMENDED): scores both setups on body%, vol, HTF alignment, manipulation, displacement, RR, Asia range. Fires only the higher-scoring one. Min score gate blocks weak setups entirely.\n\n• T1 Priority: classic ICT — T1 always wins same-sweep conflicts.\n\n• First wins: legacy v9.18 behaviour — whichever triggers first fires (random quality).")
-qualityMinScore = input.int(7, "A+ Min Score Required (0–15)", minval = 0, maxval = 15, group = gQuality, tooltip = "Minimum quality score required to fire ANY trade when conflictMode = A+ Quality Gate. Score range 0–15. Default 5 (medium quality). Set to 8+ for ultra-selective A+ only. Set to 0 to disable score gate.")
+conflictMode = input.string("First wins (legacy v9.18 behaviour)", "T1/T2 Conflict Mode", options = ["A+ Quality Gate (rank both, fire best)", "T1 Priority (block opposite-direction T2)", "First wins (legacy v9.18 behaviour)"], group = gQuality, tooltip = "When BOTH T1 and T2 setups are valid on the same sweep (e.g. T1 LONG + T2 SHORT after AL sweep), how to resolve:\n\n• A+ Quality Gate (RECOMMENDED): scores both setups on body%, vol, HTF alignment, manipulation, displacement, RR, Asia range. Fires only the higher-scoring one. Min score gate blocks weak setups entirely.\n\n• T1 Priority: classic ICT — T1 always wins same-sweep conflicts.\n\n• First wins: legacy v9.18 behaviour — whichever triggers first fires (random quality).")
+qualityMinScore = input.int(6, "A+ Min Score Required (0–15)", minval = 0, maxval = 15, group = gQuality, tooltip = "Minimum quality score required to fire ANY trade when conflictMode = A+ Quality Gate. Score range 0–15. Default 5 (medium quality). Set to 8+ for ultra-selective A+ only. Set to 0 to disable score gate.")
 qualityWaitBars = input.int(3, "A+ Conflict Wait Bars (Logic TF)", minval = 0, maxval = 10, group = gQuality, tooltip = "When BOTH T1 and T2 are valid simultaneously, wait this many logic-TF bars after the first qualifying setup before firing — gives the second setup a chance to mature for fair comparison. 0 = fire immediately on first qualified. 3 = wait 3 bars (recommended, 15 min on 5m logic).")
 
 // Score weights (advanced — collapsed by default)
@@ -174,7 +173,7 @@ wBodyStrong = input.int(2, "Body % ≥ 90% bonus", minval = 0, maxval = 5, group
 wVolStrong  = input.int(2, "Vol spike ≥ 1.5× bonus", minval = 0, maxval = 5, group = gQualityW)
 wManipPassed = input.int(2, "T1: 2nd entry / manip passed bonus", minval = 0, maxval = 5, group = gQualityW)
 wDisplaceStrong = input.int(2, "T2: displacement ≥ 2.0× ATR bonus", minval = 0, maxval = 5, group = gQualityW)
-wPdDeep = input.int(1, "T2: deep PD touch bonus", minval = 0, maxval = 5, group = gQualityW)
+wPdDeep = input.int(2, "T2: deep PD touch bonus", minval = 0, maxval = 5, group = gQualityW)
 wRrStrong = input.int(2, "RR ≥ 4 bonus (1 if ≥ 3)", minval = 0, maxval = 5, group = gQualityW)
 wAsiaWidePenalty = input.int(2, "Asia Wide penalty (T1 takes more)", minval = 0, maxval = 5, group = gQualityW, tooltip = "T1 gets -X, T2 gets -X/2 (T2 handles wide Asia better)")
 
@@ -240,8 +239,9 @@ minVolRatio = input.float(0.7, "Min volume ratio (× 20-bar avg)", minval = 0.3,
 
 gVolConf = "◆ Volume Confirmation"
 enableVolConfirm = input.bool(true, "Require volume spike on engulf", group = gVolConf, tooltip = "Engulf candle must have above-average volume to fire. Filters weak/unconvincing entries.")
-volConfirmMultManual = input.float(1.2, "Min Volume Spike (× 20-bar avg)", minval = 0.5, maxval = 3.0, step = 0.1, group = gVolConf, tooltip = "1.2 = engulf candle needs 20% above avg volume. Lower = more signals. Auto-overridden by Symbol Profile (XAUUSD = 1.00, EURUSD = 1.20). Used as-is when profile is Custom.")
-volConfirmMult = useCustom ? volConfirmMultManual : profileVolConfirm
+overrideVolConfirmMult = input.bool(true, "Override vol mult (ignore symbol profile)", group = gVolConf, inline = "vc", tooltip = "When ON: always uses the multiplier below, overriding the symbol profile auto-value. When OFF (default): profile controls the value (EUR=1.20, XAU=1.20). Enable this when you want to test lower thresholds like 1.0.")
+volConfirmMultManual = input.float(1.0, "× avg", minval = 0.5, maxval = 3.0, step = 0.1, group = gVolConf, inline = "vc", tooltip = "Min volume spike multiplier. 1.2 = engulf candle needs 20% above avg volume. Only active when Override checkbox is ON or Symbol Profile is Custom.")
+volConfirmMult = (useCustom or overrideVolConfirmMult) ? volConfirmMultManual : profileVolConfirm
 
 gCool = "◆ Setup Lifespan"
 useFullLondonWindow = input.bool(true, "Setup alive for entire London (+buffer)", group = gCool)
@@ -319,7 +319,7 @@ maxActiveObs = input.int(3, "Max Active OBs", minval = 1, maxval = 8, group = gO
 gTrend = "◆ HTF Trend TFs"
 biasTF1 = input.timeframe("30", "HTF Bias 1", options = ["15", "30", "60"], group = gTrend)
 biasTF2 = input.timeframe("240", "HTF Bias 2", options = ["60", "240", "D"], group = gTrend)
-trendLookback = input.int(20, "Trend Lookback", minval = 5, maxval = 50, group = gTrend)
+trendLookback = input.int(50, "Trend Lookback", minval = 5, maxval = 50, group = gTrend)
 
 gTrade = "◆ Trade Visuals"
 slBuffer = input.float(10.0, "SL Buffer (ticks)", minval = 0, step = 1, group = gTrade)
@@ -345,8 +345,12 @@ gVis = "◆ Visuals"
 showLabels = input.bool(true, "Entry Labels", group = gVis)
 showDashboard = input.bool(true, "Dashboard", group = gVis)
 showWatchPanel = input.bool(true, "Live Watch Panel", group = gVis)
-bullColor = input.color(#26a69a, "Bull", group = gVis)
+bullColor = input.color(#00bcd4, "Bull", group = gVis)
 bearColor = input.color(#ef5350, "Bear", group = gVis)
+
+gOutcome = "◆ Trade Outcome Tracking (v9.23)"
+enableBEMove = input.bool(true, "Auto Move SL to Breakeven", group = gOutcome, tooltip = "When price moves X R in your favour, SL is automatically moved to entry (breakeven). If price reverses back, you exit at 0R instead of -1R.")
+beThresholdR = input.float(1.5, "BE Trigger (R in profit)", minval = 0.5, maxval = 5.0, step = 0.5, group = gOutcome, tooltip = "How many R price must move in profit before SL → BE. 1.5 = when price is 1.5× the SL distance in profit.")
 
 // =============================================================================
 // PHONE ALERTS GROUP (v9.12)
@@ -461,6 +465,28 @@ var int asiaEndBar = na
 var int londonEndBar = na
 // v9.18: Track London session start bar (used as origin for London sweep lines)
 var int londonStartBar = na
+var bool londonAlertSent = false  // v9.23: gates London webhook — only first FIRED trade per session sends alert
+var bool nyAlertSent = false      // v9.23: same gate for NY session
+// v9.23: Trade Outcome Tracking — SL/TP detection + monthly stats
+var bool   outcomeActive  = false
+var string outcomeDir     = ""
+var string outcomeType    = ""
+var string outcomeSess    = ""
+var float  outcomeEntry   = na
+var float  outcomeSL      = na
+var float  outcomeTP      = na
+var float  outcomeRR      = na
+var int    outcomeFireBar = na
+var bool   outcomeBEMoved = false
+var array<int>   mStatKeys   = array.new_int(0)
+var array<int>   mStatWins   = array.new_int(0)
+var array<int>   mStatLosses = array.new_int(0)
+var array<float> mStatR      = array.new_float(0)
+var array<int>   yStatKeys   = array.new_int(0)
+var array<int>   yStatWins   = array.new_int(0)
+var array<int>   yStatLosses = array.new_int(0)
+var array<float> yStatR      = array.new_float(0)
+
 if asiaEnded
     asiaEndBar := bar_index
 if londonStarted
@@ -512,6 +538,7 @@ score4h  = computeTrend(bSum4h, sSum4h, c4h, cLB4h, atr4h, hh4h, ll4h, hhm4h, ll
 
 biasLabel(s) => s >= 60 ? "STRONG BULL" : s >= 25 ? "BULLISH" : s >= -25 ? "NEUTRAL" : s >= -60 ? "BEARISH" : "STRONG BEAR"
 biasColor(s) => s >= 60 ? color.new(#00c853, 0) : s >= 25 ? bullColor : s >= -25 ? color.gray : s >= -60 ? bearColor : color.new(#d50000, 0)
+monthStr(m) => m == 1 ? "Jan" : m == 2 ? "Feb" : m == 3 ? "Mar" : m == 4 ? "Apr" : m == 5 ? "May" : m == 6 ? "Jun" : m == 7 ? "Jul" : m == 8 ? "Aug" : m == 9 ? "Sep" : m == 10 ? "Oct" : m == 11 ? "Nov" : "Dec"
 
 bull30m = score30m >=  htfMinScore
 bear30m = score30m <= -htfMinScore
@@ -598,6 +625,7 @@ var float nyLow = na
 if londonStarted
     londonHigh := high
     londonLow  := low
+    londonAlertSent := false
     if showLondonBox
         londonBoxId := box.new(bar_index, high, bar_index, low, bgcolor = londonColor, border_color = londonColor)
 else if inLondon
@@ -612,6 +640,7 @@ else if inLondon
 if nyStarted
     nyHigh := high
     nyLow  := low
+    nyAlertSent := false
 else if inNY
     nyHigh := math.max(nz(nyHigh, high), high)
     nyLow  := math.min(nz(nyLow,  low),  low)
@@ -1959,22 +1988,28 @@ if fireShort
 // ============================================================================
 // T2 ENGINE — AMD RETRACEMENT (NEW in v8)
 // ============================================================================
-// T2 LONG logic (mirror for SHORT):
-//   1. Sweep of Asia HIGH occurred (uses existing sweptShort state — counter-intuitive!)
-//   2. Price displaced DOWN from swept Asia high (≥ t2DisplaceAtr × ATR)
-//   3. Price retraces BACK INTO Asia range
-//   4. Touches strongest PD zone (FVG/OB) inside Asia range (deepest = lowest bull zone)
+// T2 LONG logic (ICT AMD — Asia LOW swept):
+//   1. sweptLong = Asia LOW swept (price dips below, clears longs' stops = manipulation DOWN)
+//   2. Price displaces UP from swept Asia low (≥ t2DisplaceAtr × ATR = smart money buying)
+//   3. Price retraces DOWN back into Asia range
+//   4. Touches strongest bull PD zone (FVG/OB) inside Asia range
 //   5. Strong bullish engulfing (≥ t2BodyRatio) forms at that touch
 //   6. FIRE T2 LONG
 //
-// Note: T2 LONG uses sweptShort (Asia HIGH swept) and T2 SHORT uses sweptLong (Asia LOW swept)
+// T2 SHORT logic (ICT AMD — Asia HIGH swept):
+//   1. sweptShort = Asia HIGH swept (price rises above, clears shorts' stops = manipulation UP)
+//   2. Price displaces DOWN from swept Asia high (≥ t2DisplaceAtr × ATR = smart money selling)
+//   3. Price retraces UP back into Asia range
+//   4. Touches strongest bear PD zone (FVG/OB) inside Asia range
+//   5. Strong bearish engulfing (≥ t2BodyRatio) forms at that touch
+//   6. FIRE T2 SHORT
 // =============================================================================
 
 // T2 state machine — separate from T1
 var int t2LongState = 0      // 0=waiting sweep, 1=sweep confirmed waiting displacement, 2=displaced waiting retrace, 3=in retrace zone waiting engulf, 4=fired
 var int t2ShortState = 0
-var float t2LongMaxDown = na    // tracks how deep price went after Asia high sweep
-var float t2ShortMaxUp = na     // tracks how high price went after Asia low sweep
+var float t2LongMaxDown = na    // tracks max HIGH reached after Asia LOW sweep (displacement UP)
+var float t2ShortMaxUp = na     // tracks min LOW reached after Asia HIGH sweep (displacement DOWN)
 var float t2LongTargetZoneTop = na   // the strongest bull PD zone top (inside Asia)
 var float t2LongTargetZoneBot = na   // its bottom
 var float t2ShortTargetZoneTop = na
@@ -2104,16 +2139,16 @@ findStrongestBearPdInAsia() =>
     [bestTop, bestBot, bestSrc]
 
 // T2 LONG state machine
-// Uses sweptShort (Asia HIGH swept) because T2 LONG is the counter-intuitive ICT setup
+// ICT AMD: Asia LOW swept (sweptLong) → displacement UP → retrace DOWN to bull PD → LONG
 if enableT2 and inLondonExt
-    // State 0 → 1: wait for Asia HIGH sweep (this is the opposite of T1 logic)
-    if t2LongState == 0 and sweptShort and sweptShortSrc == "AH"
+    // State 0 → 1: wait for Asia LOW sweep (manipulation DOWN clears longs' stops → reversal UP)
+    if t2LongState == 0 and sweptLong and sweptLongSrc == "AL"
         t2LongState := 1
-        t2LongMaxDown := low
-    // State 1 → 2: track max displacement down from swept Asia high
+        t2LongMaxDown := high
+    // State 1 → 2: track max displacement UP from swept Asia low
     if t2LongState == 1
-        t2LongMaxDown := math.min(nz(t2LongMaxDown, low), low)
-        displacementOK = not na(sweptShortLevel) and (sweptShortLevel - t2LongMaxDown) >= atr14 * t2DisplaceAtr
+        t2LongMaxDown := math.max(nz(t2LongMaxDown, high), high)
+        displacementOK = not na(sweptLongLevel) and (t2LongMaxDown - sweptLongLevel) >= atr14 * t2DisplaceAtr
         if displacementOK
             t2LongState := 2
             // Identify strongest PD zone inside Asia range
@@ -2124,8 +2159,8 @@ if enableT2 and inLondonExt
                 t2LongZoneSrc := zsrc
                 if t2ShowZoneBox
                     t2LongZoneBox := box.new(bar_index, ztop, bar_index + 50, zbot, bgcolor = t2ZoneBoxColor, border_color = color.new(color.yellow, 40), text = "T2 Long Zone (" + zsrc + ")", text_size = size.tiny, text_color = color.new(color.yellow, 0))
-    // v9.4: Block T2 LONG if Asia LOW also gets swept
-    if t2LongState >= 1 and t2LongState <= 3 and sweptLong and sweptLongSrc == "AL"
+    // v9.4: Block T2 LONG if Asia HIGH also gets swept (opposite liq taken = setup invalidated)
+    if t2LongState >= 1 and t2LongState <= 3 and sweptShort and sweptShortSrc == "AH"
         t2LongBlockedNextLiq := true
     // State 2 → 3: wait for price to touch ANY qualifying PD zone inside Asia
     // v9.4: Check ALL qualifying PD zones, not just the stored one
@@ -2166,13 +2201,14 @@ if not na(t2LongZoneBox)
     box.set_right(t2LongZoneBox, bar_index + 10)
 
 // T2 SHORT state machine (mirror)
+// ICT AMD: Asia HIGH swept (sweptShort) → displacement DOWN → retrace UP to bear PD → SHORT
 if enableT2 and inLondonExt
-    if t2ShortState == 0 and sweptLong and sweptLongSrc == "AL"
+    if t2ShortState == 0 and sweptShort and sweptShortSrc == "AH"
         t2ShortState := 1
-        t2ShortMaxUp := high
+        t2ShortMaxUp := low
     if t2ShortState == 1
-        t2ShortMaxUp := math.max(nz(t2ShortMaxUp, high), high)
-        displacementOK = not na(sweptLongLevel) and (t2ShortMaxUp - sweptLongLevel) >= atr14 * t2DisplaceAtr
+        t2ShortMaxUp := math.min(nz(t2ShortMaxUp, low), low)
+        displacementOK = not na(sweptShortLevel) and (sweptShortLevel - t2ShortMaxUp) >= atr14 * t2DisplaceAtr
         if displacementOK
             t2ShortState := 2
             [ztop, zbot, zsrc] = findStrongestBearPdInAsia()
@@ -2182,8 +2218,8 @@ if enableT2 and inLondonExt
                 t2ShortZoneSrc := zsrc
                 if t2ShowZoneBox
                     t2ShortZoneBox := box.new(bar_index, ztop, bar_index + 50, zbot, bgcolor = t2ZoneBoxColor, border_color = color.new(color.yellow, 40), text = "T2 Short Zone (" + zsrc + ")", text_size = size.tiny, text_color = color.new(color.yellow, 0))
-    // v9.4: Block T2 SHORT if Asia HIGH also gets swept
-    if t2ShortState >= 1 and t2ShortState <= 3 and sweptShort and sweptShortSrc == "AH"
+    // v9.4: Block T2 SHORT if Asia LOW also gets swept (opposite liq taken = setup invalidated)
+    if t2ShortState >= 1 and t2ShortState <= 3 and sweptLong and sweptLongSrc == "AL"
         t2ShortBlockedNextLiq := true
     // v9.4: Check ALL qualifying PD zones for SHORT retrace
     if t2ShortState == 2
@@ -2564,25 +2600,25 @@ nyShortFiredAs2nd = nyShortIs2nd or nyShortIs2ndBoth
 // NY T2 — AMD logic with reference range = London (or Asia fallback)
 // (T2 has no manip mode — already protected by sweep+displacement+PD touch)
 if enableNyEngine and inNY and not nyTicksBlock and not nySessionLimitHit
-    // NY T2 LONG: needs AH or LH swept (short sweep happened)
-    if nySweepShort and not nyT2LongTaken and nyT2StrongBull and lowVolPass and volConfirmPass and finalLongOK
-        nyT2RefHigh = nySweepShortSrc == "LH" ? londonHigh : asiaHigh
-        nyT2RefLow  = nySweepShortSrc == "LH" ? londonLow  : asiaLow
+    // NY T2 LONG: needs AL or LL swept (low sweep — clears longs' stops → reversal UP)
+    if nySweepLong and not nyT2LongTaken and nyT2StrongBull and lowVolPass and volConfirmPass and finalLongOK
+        nyT2RefHigh = nySweepLongSrc == "LL" ? londonHigh : asiaHigh
+        nyT2RefLow  = nySweepLongSrc == "LL" ? londonLow  : asiaLow
         nyT2InRangeOK = not nyT2RequireSessionRetrace or (low <= nz(nyT2RefHigh, low) + effAtr * 0.1 and low >= nz(nyT2RefLow, low) - effAtr * 0.1)
-        nyT2Displacement = math.abs(nySweepShortLevel - low)
-        if nyT2InRangeOK and nyT2Displacement >= effAtr * t2DisplaceAtr and nyBullPdTouched and (bar_index - nySweepShortBar) >= 3
+        nyT2Displacement = math.abs(high - nySweepLongLevel)
+        if nyT2InRangeOK and nyT2Displacement >= effAtr * t2DisplaceAtr and nyBullPdTouched and (bar_index - nySweepLongBar) >= 3
             nyT2LongActualRR = nyLongRiskD > 0 and not na(nyLongTP) ? (nyLongTP - close) / nyLongRiskD : 0.0
             if nyT2LongActualRR >= t2MinRR and nyT2LongActualRR <= t2MaxRR and not na(nyLongTP)
                 fireNyT2Long := true
                 nyT2LongTaken := true
                 nySignalsThisSession += 1
-    // NY T2 SHORT
-    if nySweepLong and not nyT2ShortTaken and nyT2StrongBear and lowVolPass and volConfirmPass and finalShortOK
-        nyT2RefHigh = nySweepLongSrc == "LL" ? londonHigh : asiaHigh
-        nyT2RefLow  = nySweepLongSrc == "LL" ? londonLow  : asiaLow
+    // NY T2 SHORT: needs AH or LH swept (high sweep — clears shorts' stops → reversal DOWN)
+    if nySweepShort and not nyT2ShortTaken and nyT2StrongBear and lowVolPass and volConfirmPass and finalShortOK
+        nyT2RefHigh = nySweepShortSrc == "LH" ? londonHigh : asiaHigh
+        nyT2RefLow  = nySweepShortSrc == "LH" ? londonLow  : asiaLow
         nyT2InRangeOK = not nyT2RequireSessionRetrace or (high >= nz(nyT2RefLow, high) - effAtr * 0.1 and high <= nz(nyT2RefHigh, high) + effAtr * 0.1)
-        nyT2Displacement = math.abs(high - nySweepLongLevel)
-        if nyT2InRangeOK and nyT2Displacement >= effAtr * t2DisplaceAtr and nyBearPdTouched and (bar_index - nySweepLongBar) >= 3
+        nyT2Displacement = math.abs(nySweepShortLevel - low)
+        if nyT2InRangeOK and nyT2Displacement >= effAtr * t2DisplaceAtr and nyBearPdTouched and (bar_index - nySweepShortBar) >= 3
             nyT2ShortActualRR = nyShortRiskD > 0 and not na(nyShortTP) ? (close - nyShortTP) / nyShortRiskD : 0.0
             if nyT2ShortActualRR >= t2MinRR and nyT2ShortActualRR <= t2MaxRR and not na(nyShortTP)
                 fireNyT2Short := true
@@ -2830,11 +2866,11 @@ if oneMinFireActive and enableNyEngine and inNY and not nyTicksBlock and not nyS
         nySignalsThisSession += 1
 
     // ----- NY T2 LONG 1m fire -----
-    if nySweepShort and not nyT2LongTaken and finalLongOK and not na(nyLongTP)
-        nyT2RefHigh1m = nySweepShortSrc == "LH" ? londonHigh : asiaHigh
-        nyT2RefLow1m  = nySweepShortSrc == "LH" ? londonLow  : asiaLow
+    if nySweepLong and not nyT2LongTaken and finalLongOK and not na(nyLongTP)
+        nyT2RefHigh1m = nySweepLongSrc == "LL" ? londonHigh : asiaHigh
+        nyT2RefLow1m  = nySweepLongSrc == "LL" ? londonLow  : asiaLow
         nyT2InRangeOK1m = not nyT2RequireSessionRetrace or (low <= nz(nyT2RefHigh1m, low) + effAtr * 0.1 and low >= nz(nyT2RefLow1m, low) - effAtr * 0.1)
-        nyT2Displacement1m = math.abs(nySweepShortLevel - low)
+        nyT2Displacement1m = math.abs(high - nySweepLongLevel)
         nyT2LongRR1m = nyLongRiskD > 0 and not na(nyLongTP) ? (nyLongTP - close) / nyLongRiskD : 0.0
         v1OkNyT2L = isV1ny ? (nyPartialT2BullOK and nyOneMinVolPass) : nyOneMinVolPass
         if nyT2InRangeOK1m and nyT2Displacement1m >= effAtr * t2DisplaceAtr and nyBullPdTouched and nyChartT2Bull and v1OkNyT2L and nyT2LongRR1m >= t2MinRR and nyT2LongRR1m <= t2MaxRR
@@ -2843,11 +2879,11 @@ if oneMinFireActive and enableNyEngine and inNY and not nyTicksBlock and not nyS
             nySignalsThisSession += 1
 
     // ----- NY T2 SHORT 1m fire -----
-    if nySweepLong and not nyT2ShortTaken and finalShortOK and not na(nyShortTP)
-        nyT2RefHigh1mS = nySweepLongSrc == "LL" ? londonHigh : asiaHigh
-        nyT2RefLow1mS  = nySweepLongSrc == "LL" ? londonLow  : asiaLow
+    if nySweepShort and not nyT2ShortTaken and finalShortOK and not na(nyShortTP)
+        nyT2RefHigh1mS = nySweepShortSrc == "LH" ? londonHigh : asiaHigh
+        nyT2RefLow1mS  = nySweepShortSrc == "LH" ? londonLow  : asiaLow
         nyT2InRangeOK1mS = not nyT2RequireSessionRetrace or (high >= nz(nyT2RefLow1mS, high) - effAtr * 0.1 and high <= nz(nyT2RefHigh1mS, high) + effAtr * 0.1)
-        nyT2Displacement1mS = math.abs(high - nySweepLongLevel)
+        nyT2Displacement1mS = math.abs(nySweepShortLevel - low)
         nyT2ShortRR1m = nyShortRiskD > 0 and not na(nyShortTP) ? (close - nyShortTP) / nyShortRiskD : 0.0
         v1OkNyT2S = isV1ny ? (nyPartialT2BearOK and nyOneMinVolPass) : nyOneMinVolPass
         if nyT2InRangeOK1mS and nyT2Displacement1mS >= effAtr * t2DisplaceAtr and nyBearPdTouched and nyChartT2Bear and v1OkNyT2S and nyT2ShortRR1m >= t2MinRR and nyT2ShortRR1m <= t2MaxRR
@@ -2907,7 +2943,7 @@ scoreT2Long(bool fire) =>
         s += htfAllowsLong ? wHtfAligned : 0
         s += bullBodyPct >= 0.85 ? wBodyStrong : (bullBodyPct >= t2BodyRatio ? 1 : 0)
         s += effVolMult >= 1.5 ? wVolStrong : (effVolMult >= volConfirmMult ? 1 : 0)
-        t2LongDispAtr = atr14 > 0 and not na(sweptShortLevel) and not na(t2LongMaxDown) ? (sweptShortLevel - t2LongMaxDown) / atr14 : 0.0
+        t2LongDispAtr = atr14 > 0 and not na(sweptLongLevel) and not na(t2LongMaxDown) ? (t2LongMaxDown - sweptLongLevel) / atr14 : 0.0
         s += t2LongDispAtr >= 2.0 ? wDisplaceStrong : (t2LongDispAtr >= t2DisplaceAtr ? 1 : 0)
         pdDeepL = not na(t2LongTargetZoneTop) and not na(t2LongTargetZoneBot) and (t2LongTargetZoneTop > t2LongTargetZoneBot) and (low - t2LongTargetZoneBot) / (t2LongTargetZoneTop - t2LongTargetZoneBot) <= 0.30
         s += pdDeepL ? wPdDeep : 0
@@ -2923,7 +2959,7 @@ scoreT2Short(bool fire) =>
         s += htfAllowsShort ? wHtfAligned : 0
         s += bearBodyPct >= 0.85 ? wBodyStrong : (bearBodyPct >= t2BodyRatio ? 1 : 0)
         s += effVolMult >= 1.5 ? wVolStrong : (effVolMult >= volConfirmMult ? 1 : 0)
-        t2ShortDispAtr = atr14 > 0 and not na(sweptLongLevel) and not na(t2ShortMaxUp) ? (t2ShortMaxUp - sweptLongLevel) / atr14 : 0.0
+        t2ShortDispAtr = atr14 > 0 and not na(sweptShortLevel) and not na(t2ShortMaxUp) ? (sweptShortLevel - t2ShortMaxUp) / atr14 : 0.0
         s += t2ShortDispAtr >= 2.0 ? wDisplaceStrong : (t2ShortDispAtr >= t2DisplaceAtr ? 1 : 0)
         pdDeepS = not na(t2ShortTargetZoneTop) and not na(t2ShortTargetZoneBot) and (t2ShortTargetZoneTop > t2ShortTargetZoneBot) and (t2ShortTargetZoneTop - high) / (t2ShortTargetZoneTop - t2ShortTargetZoneBot) <= 0.30
         s += pdDeepS ? wPdDeep : 0
@@ -3117,7 +3153,171 @@ if fireT2ShortAny
 
 // T2 Short: signal-only (use TradingView alerts to fire to broker)
 
-// (No auto-close needed in indicator mode — alerts handle position lifecycle.)
+// =============================================================================
+// TRADE OUTCOME TRACKING (v9.23) — Detect SL/TP hit after each FIRED trade
+// =============================================================================
+// After a trade fires, price is tracked on every subsequent bar.
+// When SL or TP is hit → record result, draw label, update monthly stats, send webhook.
+// If both SL and TP are hit on the same bar → counts as LOSS (conservative).
+
+// --- Function: resolve trade details for the fired signal ---
+getOutcomeDetails() =>
+    string dir = ""
+    string typ = ""
+    string sess = ""
+    float sl = na
+    float tp = na
+    float rr = na
+    if fireLongAny
+        isNyL = fireNyLong or fireNyLong1m
+        dir  := "LONG"
+        typ  := fireLong2nd ? "T1 LONG (2nd)" : "T1 LONG (1st)"
+        sess := isNyL ? "NY" : "London"
+        sl   := isNyL ? nyLongSL : finalLongSL
+        tp   := isNyL ? nyLongTP : longCandidateTP
+        rr   := isNyL ? nyLongActualRR : longActualRR
+    else if fireShortAny
+        isNyS = fireNyShort or fireNyShort1m
+        dir  := "SHORT"
+        typ  := fireShort2nd ? "T1 SHORT (2nd)" : "T1 SHORT (1st)"
+        sess := isNyS ? "NY" : "London"
+        sl   := isNyS ? nyShortSL : finalShortSL
+        tp   := isNyS ? nyShortTP : shortCandidateTP
+        rr   := isNyS ? nyShortActualRR : shortActualRR
+    else if fireT2LongAny
+        isNyT2L = fireNyT2Long or fireNyT2Long1m
+        dir  := "LONG"
+        typ  := "T2 LONG (AMD)"
+        sess := isNyT2L ? "NY" : "London"
+        sl   := isNyT2L ? nyLongSL : finalT2LongSL
+        tp   := isNyT2L ? nyLongTP : t2LongTP
+        rr   := isNyT2L ? (nyLongRiskD > 0 and not na(nyLongTP) ? (nyLongTP - close) / nyLongRiskD : 0.0) : t2LongRR
+    else if fireT2ShortAny
+        isNyT2S = fireNyT2Short or fireNyT2Short1m
+        dir  := "SHORT"
+        typ  := "T2 SHORT (AMD)"
+        sess := isNyT2S ? "NY" : "London"
+        sl   := isNyT2S ? nyShortSL : finalT2ShortSL
+        tp   := isNyT2S ? nyShortTP : t2ShortTP
+        rr   := isNyT2S ? (nyShortRiskD > 0 and not na(nyShortTP) ? (close - nyShortTP) / nyShortRiskD : 0.0) : t2ShortRR
+    [dir, typ, sess, sl, tp, rr]
+
+// --- Function: check SL/TP hit, update stats, draw label, send webhook ---
+checkOutcomeHit() =>
+    bool hit = false
+    string res = ""
+    float exitPx = na
+    float rrAch = na
+    if outcomeActive and bar_index > outcomeFireBar and not na(outcomeSL) and not na(outcomeTP)
+        bool slHit = false
+        bool tpHit = false
+        if outcomeDir == "LONG"
+            slHit := low <= outcomeSL
+            tpHit := high >= outcomeTP
+        else
+            slHit := high >= outcomeSL
+            tpHit := low <= outcomeTP
+        if slHit or tpHit
+            hit := true
+            if tpHit and not slHit
+                res   := "WIN"
+                exitPx := outcomeTP
+                rrAch  := outcomeRR
+            else if slHit and outcomeBEMoved
+                res   := "BE"
+                exitPx := outcomeEntry
+                rrAch  := 0.0
+            else
+                res   := "LOSS"
+                exitPx := outcomeSL
+                rrAch  := -1.0
+            // Update monthly stats
+            int mKey = year(time) * 100 + month(time)
+            int mIdx = array.indexof(mStatKeys, mKey)
+            if mIdx == -1
+                array.push(mStatKeys, mKey)
+                array.push(mStatWins, res == "WIN" ? 1 : 0)
+                array.push(mStatLosses, res == "LOSS" ? 1 : 0)
+                array.push(mStatR, rrAch)
+            else
+                if res == "WIN"
+                    array.set(mStatWins, mIdx, array.get(mStatWins, mIdx) + 1)
+                else if res == "LOSS"
+                    array.set(mStatLosses, mIdx, array.get(mStatLosses, mIdx) + 1)
+                array.set(mStatR, mIdx, array.get(mStatR, mIdx) + rrAch)
+            // Update yearly stats
+            int yKey = year(time)
+            int yIdx = array.indexof(yStatKeys, yKey)
+            if yIdx == -1
+                array.push(yStatKeys, yKey)
+                array.push(yStatWins, res == "WIN" ? 1 : 0)
+                array.push(yStatLosses, res == "LOSS" ? 1 : 0)
+                array.push(yStatR, rrAch)
+            else
+                if res == "WIN"
+                    array.set(yStatWins, yIdx, array.get(yStatWins, yIdx) + 1)
+                else if res == "LOSS"
+                    array.set(yStatLosses, yIdx, array.get(yStatLosses, yIdx) + 1)
+                array.set(yStatR, yIdx, array.get(yStatR, yIdx) + rrAch)
+            // Draw result label on chart
+            if showLabels
+                resultTxt = res == "WIN" ? "✅ TP +" + str.tostring(rrAch, "#.#") + "R" : res == "BE" ? "🔒 BE 0R" : "❌ SL -1R"
+                resultCol = res == "WIN" ? color.new(#00e676, 30) : res == "BE" ? color.new(color.orange, 30) : color.new(#ff1744, 30)
+                labelY = res == "WIN" ? outcomeTP : outcomeSL
+                labelStyle = outcomeDir == "LONG" ? (res == "WIN" ? label.style_label_down : label.style_label_up) : (res == "WIN" ? label.style_label_up : label.style_label_down)
+                label.new(bar_index, labelY, resultTxt, color = resultCol, textcolor = color.white, style = labelStyle, size = size.tiny)
+            // Send outcome webhook
+            if enableJsonAlerts
+                string rJson = "{"
+                rJson += "\"secret\":\"" + webhookSecret + "\","
+                rJson += "\"event\":\"trade_result\","
+                rJson += "\"symbol\":\"" + syminfo.ticker + "\","
+                rJson += "\"side\":\"" + outcomeDir + "\","
+                rJson += "\"trade\":\"" + outcomeType + "\","
+                rJson += "\"session\":\"" + outcomeSess + "\","
+                rJson += "\"result\":\"" + res + "\","
+                rJson += "\"entry\":" + str.tostring(outcomeEntry) + ","
+                rJson += "\"sl\":" + str.tostring(outcomeSL) + ","
+                rJson += "\"tp\":" + str.tostring(outcomeTP) + ","
+                rJson += "\"exit\":" + str.tostring(exitPx) + ","
+                rJson += "\"rr_planned\":" + str.tostring(outcomeRR, "#.##") + ","
+                rJson += "\"rr_achieved\":" + str.tostring(rrAch, "#.#") + ","
+                rJson += "\"be_moved\":" + (outcomeBEMoved ? "true" : "false") + ","
+                rJson += "\"version\":\"9.23\""
+                rJson += "}"
+                alert(rJson, alert.freq_once_per_bar)
+    [hit, res, exitPx, rrAch]
+
+// --- Capture (main body: minimal) ---
+anyFireForOutcome = fireLongAny or fireShortAny or fireT2LongAny or fireT2ShortAny
+[oDir, oType, oSess, oSL, oTP, oRR] = getOutcomeDetails()
+if anyFireForOutcome
+    outcomeActive  := true
+    outcomeBEMoved := false
+    outcomeEntry   := close
+    outcomeFireBar := bar_index
+    outcomeDir  := oDir
+    outcomeType := oType
+    outcomeSess := oSess
+    outcomeSL   := oSL
+    outcomeTP   := oTP
+    outcomeRR   := oRR
+
+// --- Auto SL → BE when price moves X R in profit ---
+if outcomeActive and not outcomeBEMoved and enableBEMove and bar_index > outcomeFireBar and not na(outcomeSL) and not na(outcomeEntry)
+    float riskDist = math.abs(outcomeEntry - outcomeSL)
+    float beTarget = outcomeDir == "LONG" ? outcomeEntry + beThresholdR * riskDist : outcomeEntry - beThresholdR * riskDist
+    bool beReached = outcomeDir == "LONG" ? high >= beTarget : low <= beTarget
+    if beReached
+        outcomeSL      := outcomeEntry
+        outcomeBEMoved := true
+        if showLabels
+            label.new(bar_index, outcomeEntry, "🔒 BE", color = color.new(color.orange, 30), textcolor = color.white, style = outcomeDir == "LONG" ? label.style_label_up : label.style_label_down, size = size.tiny)
+
+// --- Detect outcome (main body: minimal) ---
+[outcomeHit, outcomeResult, outcomeExitPrice, outcomeRRAchieved] = checkOutcomeHit()
+if outcomeHit
+    outcomeActive := false
 
 // =============================================================================
 // LIVE WATCH PANEL
@@ -3498,10 +3698,10 @@ buildJsonAlert(string side, string trade, string sessionName, string tfTag, floa
     // For T1 we set it to engulf candle range / atr (approximation of momentum)
     float displacementAtr = 0.0
     if str.contains(trade, "T2") and atr14 > 0
-        if side == "LONG" and not na(sweptShortLevel) and not na(t2LongMaxDown)
-            displacementAtr := (sweptShortLevel - t2LongMaxDown) / atr14
-        else if side == "SHORT" and not na(sweptLongLevel) and not na(t2ShortMaxUp)
-            displacementAtr := (t2ShortMaxUp - sweptLongLevel) / atr14
+        if side == "LONG" and not na(sweptLongLevel) and not na(t2LongMaxDown)
+            displacementAtr := (t2LongMaxDown - sweptLongLevel) / atr14
+        else if side == "SHORT" and not na(sweptShortLevel) and not na(t2ShortMaxUp)
+            displacementAtr := (sweptShortLevel - t2ShortMaxUp) / atr14
     else if atr14 > 0
         // T1: use engulf candle range as proxy for displacement strength
         displacementAtr := (high - low) / atr14
@@ -3581,9 +3781,16 @@ if enablePhoneAlerts and alertOn5m and any5mFire
         refRng = nySweepLongSrc == "LL" ? "London" : "Asia"
         rrVal = nyShortRiskD > 0 and not na(nyShortTP) ? (close - nyShortTP) / nyShortRiskD : 0.0
         alertJson := buildJsonAlert("SHORT", "T2 SHORT (AMD)", "NY", "", close, nyShortSL, nyShortSlSrc, nyShortTP, nyShortTpSrc, rrVal, nySweepLongSrc, false, asiaTooWide)
-    // v9.15: Emit JSON when toggle ON, else legacy plain text
+    // v9.23: ONE alert per session — gate by London/NY, only on actual FIRE (never ready-state)
     if enableJsonAlerts and alertJson != ""
-        alert(alertJson, alert.freq_once_per_bar)
+        isNyFire5m = fire5m_NyT1Long or fire5m_NyT1Short or fire5m_NyT2Long or fire5m_NyT2Short
+        sessionOk5m = isNyFire5m ? not nyAlertSent : not londonAlertSent
+        if sessionOk5m
+            alert(alertJson, alert.freq_once_per_bar)
+            if isNyFire5m
+                nyAlertSent := true
+            else
+                londonAlertSent := true
 
 // Build and send 1m precision alerts
 if enablePhoneAlerts and alertOn1m and any1mFire
@@ -3614,14 +3821,84 @@ if enablePhoneAlerts and alertOn1m and any1mFire
         refRng = nySweepLongSrc == "LL" ? "London" : "Asia"
         rrVal = nyShortRiskD > 0 and not na(nyShortTP) ? (close - nyShortTP) / nyShortRiskD : 0.0
         alertJson1m := buildJsonAlert("SHORT", "T2 SHORT (AMD)", "NY", tfTagPhone, close, nyShortSL, nyShortSlSrc, nyShortTP, nyShortTpSrc, rrVal, nySweepLongSrc, false, asiaTooWide)
-    // v9.15: Emit JSON when toggle ON, else legacy plain text
+    // v9.23: ONE alert per session — same gate as 5m, 1m and 5m share the same flag
     if enableJsonAlerts and alertJson1m != ""
-        alert(alertJson1m, alert.freq_once_per_bar)
+        isNyFire1m = fireNyLong1m or fireNyShort1m or fireNyT2Long1m or fireNyT2Short1m
+        sessionOk1m = isNyFire1m ? not nyAlertSent : not londonAlertSent
+        if sessionOk1m
+            alert(alertJson1m, alert.freq_once_per_bar)
+            if isNyFire1m
+                nyAlertSent := true
+            else
+                londonAlertSent := true
+
+// =============================================================================
+// MONTHLY STATS TABLE (v9.23) — Win/Loss/WR%/R per month from chart history
+// =============================================================================
+drawMonthlyStats(tbl) =>
+    color hdrBg = color.new(#9c27b0, 30)
+    table.cell(tbl, 0, 0, "◆ Period", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 0, "W", bgcolor = hdrBg, text_color = #00e676, text_size = size.tiny)
+    table.cell(tbl, 2, 0, "L", bgcolor = hdrBg, text_color = #ff1744, text_size = size.tiny)
+    table.cell(tbl, 3, 0, "WR%", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 4, 0, "R", bgcolor = hdrBg, text_color = color.white, text_size = size.tiny)
+    int nRows = math.min(array.size(mStatKeys), 6)
+    int row = 1
+    // Monthly rows
+    for i = 0 to nRows - 1
+        int idx = array.size(mStatKeys) - 1 - i
+        int mK = array.get(mStatKeys, idx)
+        int mY = math.floor(mK / 100)
+        int mM = mK % 100
+        string mName = monthStr(mM) + " " + str.tostring(mY)
+        int w = array.get(mStatWins, idx)
+        int l = array.get(mStatLosses, idx)
+        float r = array.get(mStatR, idx)
+        int total = w + l
+        float wr = total > 0 ? math.round(w * 100.0 / total) : 0.0
+        color wrCol = wr >= 65 ? #00e676 : wr >= 50 ? color.yellow : #ff1744
+        color rCol = r > 0 ? #00e676 : r == 0 ? color.gray : #ff1744
+        table.cell(tbl, 0, row, mName, text_color = color.white, text_size = size.tiny)
+        table.cell(tbl, 1, row, str.tostring(w), text_color = #00e676, text_size = size.tiny)
+        table.cell(tbl, 2, row, str.tostring(l), text_color = #ff1744, text_size = size.tiny)
+        table.cell(tbl, 3, row, str.tostring(wr, "#") + "%", text_color = wrCol, text_size = size.tiny)
+        table.cell(tbl, 4, row, (r >= 0 ? "+" : "") + str.tostring(r, "#.#") + "R", text_color = rCol, text_size = size.tiny)
+        row += 1
+    // Yearly summary rows
+    int nYears = math.min(array.size(yStatKeys), 3)
+    if nYears > 0
+        color yrBg = color.new(#1565c0, 30)
+        for i = 0 to nYears - 1
+            int yIdx = array.size(yStatKeys) - 1 - i
+            int yK = array.get(yStatKeys, yIdx)
+            int yw = array.get(yStatWins, yIdx)
+            int yl = array.get(yStatLosses, yIdx)
+            float yr = array.get(yStatR, yIdx)
+            int yTotal = yw + yl
+            float yWr = yTotal > 0 ? math.round(yw * 100.0 / yTotal) : 0.0
+            color yWrCol = yWr >= 65 ? #00e676 : yWr >= 50 ? color.yellow : #ff1744
+            color yRCol = yr > 0 ? #00e676 : yr == 0 ? color.gray : #ff1744
+            table.cell(tbl, 0, row, "◆ " + str.tostring(yK), bgcolor = yrBg, text_color = color.white, text_size = size.tiny)
+            table.cell(tbl, 1, row, str.tostring(yw), bgcolor = yrBg, text_color = #00e676, text_size = size.tiny)
+            table.cell(tbl, 2, row, str.tostring(yl), bgcolor = yrBg, text_color = #ff1744, text_size = size.tiny)
+            table.cell(tbl, 3, row, str.tostring(yWr, "#") + "%", bgcolor = yrBg, text_color = yWrCol, text_size = size.tiny)
+            table.cell(tbl, 4, row, (yr >= 0 ? "+" : "") + str.tostring(yr, "#.#") + "R", bgcolor = yrBg, text_color = yRCol, text_size = size.tiny)
+            row += 1
+
+var table statsTable = table.new(position.bottom_right, 5, 12, bgcolor = color.new(color.black, 85), border_width = 1, border_color = color.new(color.white, 80))
+if showDashboard and barstate.islast and (array.size(mStatKeys) > 0 or array.size(yStatKeys) > 0)
+    drawMonthlyStats(statsTable)
 
 // Chart sound on every fire (when at desk)
 plotFireSound = (any5mFire or any1mFire) and playChartSound and enablePhoneAlerts
 plot(plotFireSound ? 1 : na, "Fire Sound Trigger", color = color.new(color.yellow, 100), display = display.none)
 alertcondition(plotFireSound, "WMFx Fire Sound", "Trade fired — chart sound")
+
+// v9.23: Trade outcome alertconditions
+alertcondition(outcomeHit and outcomeResult == "WIN", "Trade Result: WIN", "WMFx — TP Hit! Trade won")
+alertcondition(outcomeHit and outcomeResult == "LOSS", "Trade Result: LOSS", "WMFx — SL Hit! Trade lost")
+alertcondition(outcomeHit and outcomeResult == "BE", "Trade Result: BE", "WMFx — SL hit at breakeven (0R)")
+alertcondition(outcomeHit, "Any Trade Result", "WMFx — Trade outcome determined")
 
 // =============================================================================
 // LEGACY ALERTS (alertcondition — for backward compat / power users)

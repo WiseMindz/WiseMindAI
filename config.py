@@ -40,3 +40,16 @@ ACCOUNT_BALANCE = float(os.getenv("ACCOUNT_BALANCE", 50000))
 ACCOUNT_RISK_PERCENT = float(os.getenv("ACCOUNT_RISK_PERCENT", 1.0))
 ACCOUNT_CURRENCY = os.getenv("ACCOUNT_CURRENCY", "USD")
 
+# ==================== METAAPI (MT5 AUTO-EXECUTION) ====================
+METAAPI_TOKEN      = os.getenv("METAAPI_TOKEN", "")
+METAAPI_ACCOUNT_ID = os.getenv("METAAPI_ACCOUNT_ID", "")
+
+# Set MT5_EXECUTION_ENABLED=true in .env to go live
+MT5_EXECUTION_ENABLED = os.getenv("MT5_EXECUTION_ENABLED", "false").lower() == "true"
+
+# Dry-run: calculates + logs everything but does NOT send order to MT5
+MT5_DRY_RUN = os.getenv("MT5_DRY_RUN", "false").lower() == "true"
+
+# Minimum signal grade to execute: "A+" = only A+, "B" = A+ and B, "C" = all
+MT5_MIN_GRADE = os.getenv("MT5_MIN_GRADE", "B")
+

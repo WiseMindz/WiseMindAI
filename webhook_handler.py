@@ -1,6 +1,7 @@
 """
 Webhook handler för TradingView-alerts.
-Tar emot JSON från Pine Script v9.22+, sparar i DB, postar till Telegram.
+Tar emot JSON från Pine Script v9.22+, sparar i DB, postar till Telegram,
+och exekverar trades automatiskt på MT5 via MetaAPI.
 
 v9.22 schema adds:
 - quality_score (int 0-100, Pine-computed)
@@ -11,6 +12,7 @@ v9.22 schema adds:
 """
 
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from typing import Optional
 import re
@@ -21,14 +23,40 @@ from config import (
     WEBHOOK_SECRET,
     ACCOUNT_BALANCE,
     ACCOUNT_RISK_PERCENT,
+    METAAPI_TOKEN,
+    METAAPI_ACCOUNT_ID,
+    MT5_EXECUTION_ENABLED,
+    MT5_DRY_RUN,
+    MT5_MIN_GRADE,
 )
-from database import save_trade, save_message
+from database import save_trade, save_trade_result, get_monthly_stats, save_message
 from signal_utils import evaluate_signal
+import mt5_executor
 
 logger = logging.getLogger(__name__)
 
+
+# ── FastAPI lifespan (MetaAPI connect / disconnect) ───────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    if MT5_EXECUTION_ENABLED:
+        logger.info("MetaAPI: initializing MT5 connection...")
+        ok = await mt5_executor.init_connection(METAAPI_TOKEN, METAAPI_ACCOUNT_ID)
+        if not ok:
+            logger.warning("⚠️  MetaAPI init failed — webhook will run WITHOUT MT5 execution")
+    elif MT5_DRY_RUN:
+        logger.info("MetaAPI: DRY RUN mode — trades will be logged but NOT sent to MT5")
+    else:
+        logger.info("MetaAPI: execution disabled (set MT5_EXECUTION_ENABLED=true to enable)")
+    yield
+    # Shutdown
+    await mt5_executor.close_connection()
+
+
 # FastAPI app
-app = FastAPI(title="WiseMind Webhook Receiver")
+app = FastAPI(title="WiseMind Webhook Receiver", lifespan=lifespan)
 
 # Telegram bot för att posta meddelanden
 telegram_bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -164,7 +192,7 @@ def get_chart_url(symbol: str) -> str:
     return f"https://www.tradingview.com/chart/?symbol={clean}"
 
 
-def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evaluation: dict) -> str:
+def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evaluation: dict, exec_result: Optional[dict] = None) -> str:
     """Bygger ett snyggt formatterat Telegram-meddelande från alert data + signal evaluation (v9.22)."""
     side = data.get("side", "?").upper()
     arrow = "▲" if side == "LONG" else "▼"
@@ -246,6 +274,23 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
     if reasons:
         msg += "<i>" + " | ".join(reasons) + "</i>\n"
 
+    # ── MT5 execution status ──────────────────────────────────────────────────
+    if exec_result is not None:
+        msg += "\n"
+        if exec_result.get("dry_run"):
+            msg += f"🔬 <i>DRY RUN — would execute {lot_calc['lot']} lots (grade {exec_result.get('grade', '?')})</i>\n"
+        elif exec_result.get("skipped"):
+            msg += f"⏭️ <i>MT5 skipped — grade {exec_result.get('grade','?')} below min {exec_result.get('min_grade','?')}</i>\n"
+        elif exec_result.get("success") is True:
+            entry_px = exec_result.get("entry_price", "")
+            order_id = exec_result.get("order_id", "")
+            entry_str = f" @ {entry_px}" if entry_px else ""
+            order_str = f" | #{order_id}" if order_id else ""
+            msg += f"✅ <b>MT5 EXECUTED</b> — {lot_calc['lot']} lots{entry_str}{order_str}\n"
+        elif exec_result.get("success") is False:
+            err = exec_result.get("error", "unknown error")
+            msg += f"❌ <b>MT5 FAILED</b> — <i>{err}</i>\n"
+
     chart_url = get_chart_url(symbol)
     msg += f"\n📊 <a href=\"{chart_url}\">View Chart on TradingView</a>"
     if pine_version:
@@ -255,17 +300,89 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
     return msg
 
 
+# ==================== TRADE RESULT FORMATTING ====================
+
+def format_result_telegram_message(data: dict, save_info: dict, monthly: list) -> str:
+    """Bygger Telegram-meddelande för trade outcome (WIN/LOSS) från Pine v9.23+."""
+    result = data.get("result", "?")
+    symbol = data.get("symbol", "?")
+    side = data.get("side", "?").upper()
+    trade_type = data.get("trade", "")
+    session = data.get("session", "")
+    entry = data.get("entry", 0)
+    sl = data.get("sl", 0)
+    tp = data.get("tp", 0)
+    exit_price = data.get("exit", 0)
+    rr_planned = data.get("rr_planned", 0)
+    rr_achieved = data.get("rr_achieved", 0)
+
+    if result == "WIN":
+        emoji = "✅"
+        result_text = f"TP HIT — +{rr_achieved}R"
+        header_emoji = "🟢"
+    elif result == "BE":
+        emoji = "🔒"
+        result_text = "BREAKEVEN — 0R"
+        header_emoji = "🟡"
+    else:
+        emoji = "❌"
+        result_text = "SL HIT — -1R"
+        header_emoji = "🔴"
+
+    arrow = "▲" if side == "LONG" else "▼"
+    session_tag = f" [{session}]" if session else ""
+    trade_tag = f" {trade_type}" if trade_type else ""
+
+    msg = f"{header_emoji} <b>TRADE RESULT: {result}</b>\n"
+    msg += f"{emoji} {arrow} {symbol}{trade_tag}{session_tag}\n\n"
+    msg += f"Entry: {entry}\n"
+    msg += f"SL: {sl} | TP: {tp}\n"
+    msg += f"Exit: <b>{exit_price}</b>\n"
+    msg += f"RR: {rr_planned}R planned → <b>{rr_achieved}R achieved</b>\n"
+
+    # Linked trade info
+    if save_info.get("matched_trade_id"):
+        msg += f"\n🔗 <i>Linked to trade #{save_info['matched_trade_id']}</i>\n"
+
+    # Monthly stats summary
+    if monthly:
+        msg += "\n📊 <b>Monthly Stats:</b>\n"
+        for m in monthly[-3:]:  # Last 3 months
+            wr = m["win_rate"]
+            wr_emoji = "🟢" if wr >= 65 else ("🟡" if wr >= 50 else "🔴")
+            msg += (
+                f"  {m['month']} {m['year']}: "
+                f"{m['wins']}W / {m['losses']}L "
+                f"({wr_emoji} {wr}%) "
+                f"| {m['total_r']:+.1f}R\n"
+            )
+
+    chart_url = get_chart_url(symbol)
+    msg += f"\n📊 <a href=\"{chart_url}\">View Chart</a>"
+    version = data.get("version", "")
+    if version:
+        msg += f"\n<i>Pine v{version}</i>"
+    msg += "\n💾 <i>Resultat sparat</i>"
+
+    return msg
+
+
 # ==================== WEBHOOK ENDPOINT ====================
 
 @app.get("/")
 async def root():
-    return {"status": "WiseMind Webhook Receiver är igång", "version": "9.22"}
+    return {"status": "WiseMind Webhook Receiver är igång", "version": "9.23"}
 
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
     try:
         data = await request.json()
+
+        # ── v9.23: Trade Result Webhook ──────────────────────────────────────
+        if data.get("event") == "trade_result":
+            return await handle_trade_result(data)
+        # ── End Trade Result routing ─────────────────────────────────────────
 
         if not all(field in data for field in ["symbol", "side", "entry", "sl", "tp"]):
             alert_text = data.get("alert_message") or data.get("message") or data.get("text")
@@ -304,6 +421,36 @@ async def receive_webhook(request: Request):
         evaluation = evaluate_signal(data)
         logger.info(f"Signal evaluation: {evaluation['rating']} ({evaluation['score']}/10)")
 
+        # ── MT5 Auto-Execution ────────────────────────────────────────────────
+        exec_result = None
+        grade = evaluation.get("rating", "C")
+
+        if MT5_DRY_RUN:
+            # Dry run: log everything, send nothing
+            exec_result = {
+                "success": None,  # None = dry run
+                "dry_run": True,
+                "lot": lot_calc["lot"],
+                "grade": grade,
+            }
+            logger.info(f"🔬 DRY RUN: would execute {data['side']} {lot_calc['lot']} {data['symbol']} (grade {grade})")
+
+        elif MT5_EXECUTION_ENABLED:
+            if mt5_executor.should_execute(grade, MT5_MIN_GRADE):
+                logger.info(f"Executing on MT5: {data['side']} {lot_calc['lot']} {data['symbol']} (grade {grade})")
+                exec_result = await mt5_executor.execute_trade(
+                    symbol  = data["symbol"],
+                    side    = data["side"],
+                    lot     = lot_calc["lot"],
+                    sl      = float(data["sl"]),
+                    tp      = float(data["tp"]),
+                    comment = f"WiseMind v9.22 {grade}",
+                )
+            else:
+                exec_result = {"success": None, "skipped": True, "grade": grade, "min_grade": MT5_MIN_GRADE}
+                logger.info(f"⏭️  MT5 skipped — grade {grade} < min {MT5_MIN_GRADE}")
+        # ── End MT5 Execution ─────────────────────────────────────────────────
+
         try:
             pine_score_str = (
                 f"PineScore:{data.get('quality_score', '')}/{data.get('quality_grade', '')} | "
@@ -328,7 +475,7 @@ async def receive_webhook(request: Request):
         except Exception as e:
             logger.error(f"Failed to save trade: {e}")
 
-        msg = format_telegram_message(data, lot_calc, tp_profit, evaluation)
+        msg = format_telegram_message(data, lot_calc, tp_profit, evaluation, exec_result)
 
         # Broadcast only to configured Telegram chat_id
         BROADCAST_TARGETS = [TELEGRAM_CHAT_ID]
@@ -389,6 +536,108 @@ async def receive_webhook(request: Request):
     except Exception as e:
         logger.error(f"Webhook error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_trade_result(data: dict):
+    """
+    Hanterar trade outcome webhook från Pine v9.23+.
+    Sparar resultat i DB, uppdaterar matchande trade, skickar Telegram-notis.
+
+    Expected JSON:
+    {
+      "secret": "wisemind2026", "event": "trade_result",
+      "symbol": "XAUUSD", "side": "LONG", "trade": "T2 LONG (AMD)",
+      "session": "London", "result": "WIN",
+      "entry": 4350.50, "sl": 4345.00, "tp": 4380.00, "exit": 4380.00,
+      "rr_planned": 5.4, "rr_achieved": 5.4, "version": "9.23"
+    }
+    """
+    logger.info(f"Trade result received: {data.get('symbol')} {data.get('side')} → {data.get('result')}")
+
+    # Auth
+    if data.get("secret") != WEBHOOK_SECRET:
+        logger.warning(f"Trade result secret mismatch! Got: {data.get('secret')}")
+        raise HTTPException(status_code=401, detail="Invalid secret")
+
+    # Validate required fields
+    required = ["symbol", "side", "result", "entry"]
+    for field in required:
+        if field not in data:
+            logger.error(f"Trade result missing field: {field}")
+            raise HTTPException(status_code=400, detail=f"Missing field: {field}")
+
+    result = data.get("result", "").upper()
+    if result not in ("WIN", "LOSS", "BE"):
+        raise HTTPException(status_code=400, detail=f"Invalid result: {result}")
+
+    # Save to database
+    try:
+        save_info = await save_trade_result(
+            symbol=data["symbol"],
+            direction=data["side"],
+            result=result,
+            entry=float(data.get("entry", 0)),
+            sl=float(data.get("sl", 0)),
+            tp=float(data.get("tp", 0)),
+            exit_price=float(data.get("exit", 0)),
+            rr_planned=float(data.get("rr_planned", 0)),
+            rr_achieved=float(data.get("rr_achieved", 0)),
+            trade_type=data.get("trade", ""),
+            session=data.get("session", ""),
+            version=data.get("version", ""),
+        )
+        logger.info(f"Trade result saved: id={save_info['id']}, matched_trade={save_info['matched_trade_id']}")
+    except Exception as e:
+        logger.error(f"Failed to save trade result: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+    # Get monthly stats for context
+    try:
+        monthly = await get_monthly_stats(months=6)
+    except Exception as e:
+        logger.error(f"Failed to get monthly stats: {e}")
+        monthly = []
+
+    # Format and send Telegram message
+    msg = format_result_telegram_message(data, save_info, monthly)
+
+    try:
+        await telegram_bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text=msg,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        logger.info(f"Trade result posted to Telegram")
+    except Exception as e:
+        logger.error(f"Failed to post trade result to Telegram: {e}")
+
+    # Save to message memory for Claude context
+    try:
+        rr_str = f"{data.get('rr_achieved', 0)}R" if result == "WIN" else "-1R"
+        summary = (
+            f"Trade result: {data.get('symbol')} {data.get('side')} {data.get('trade', '')} "
+            f"→ {result} ({rr_str}) | Session: {data.get('session', '')} | "
+            f"Entry: {data.get('entry')} Exit: {data.get('exit')} | "
+            f"ver={data.get('version', '')}"
+        )
+        await save_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            user_id=None,
+            username="TradingView",
+            role="system",
+            text=summary,
+        )
+    except Exception as e:
+        logger.error(f"Failed to save result summary: {e}")
+
+    return {
+        "status": "ok",
+        "event": "trade_result",
+        "result": result,
+        "result_id": save_info["id"],
+        "matched_trade_id": save_info.get("matched_trade_id"),
+    }
 
 
 @app.post("/test")
