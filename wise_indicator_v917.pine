@@ -161,21 +161,18 @@ enableBiasFilter = input.bool(true, "Apply bias filter to T1 and T2", group = gB
 // =============================================================================
 // A+ QUALITY GATE (v9.19) — Resolves T1 vs T2 conflicts on same sweep
 // =============================================================================
-gQuality = "◆ A+ Quality Gate (v9.19)"
-conflictMode = input.string("First wins (legacy v9.18 behaviour)", "T1/T2 Conflict Mode", options = ["A+ Quality Gate (rank both, fire best)", "T1 Priority (block opposite-direction T2)", "First wins (legacy v9.18 behaviour)"], group = gQuality, tooltip = "When BOTH T1 and T2 setups are valid on the same sweep (e.g. T1 LONG + T2 SHORT after AL sweep), how to resolve:\n\n• A+ Quality Gate (RECOMMENDED): scores both setups on body%, vol, HTF alignment, manipulation, displacement, RR, Asia range. Fires only the higher-scoring one. Min score gate blocks weak setups entirely.\n\n• T1 Priority: classic ICT — T1 always wins same-sweep conflicts.\n\n• First wins: legacy v9.18 behaviour — whichever triggers first fires (random quality).")
-qualityMinScore = input.int(6, "A+ Min Score Required (0–15)", minval = 0, maxval = 15, group = gQuality, tooltip = "Minimum quality score required to fire ANY trade when conflictMode = A+ Quality Gate. Score range 0–15. Default 5 (medium quality). Set to 8+ for ultra-selective A+ only. Set to 0 to disable score gate.")
-qualityWaitBars = input.int(3, "A+ Conflict Wait Bars (Logic TF)", minval = 0, maxval = 10, group = gQuality, tooltip = "When BOTH T1 and T2 are valid simultaneously, wait this many logic-TF bars after the first qualifying setup before firing — gives the second setup a chance to mature for fair comparison. 0 = fire immediately on first qualified. 3 = wait 3 bars (recommended, 15 min on 5m logic).")
-
-// Score weights (advanced — collapsed by default)
-gQualityW = "◆ A+ Score Weights (advanced)"
-wHtfAligned = input.int(3, "HTF aligned bonus", minval = 0, maxval = 5, group = gQualityW)
-wBodyStrong = input.int(2, "Body % ≥ 90% bonus", minval = 0, maxval = 5, group = gQualityW)
-wVolStrong  = input.int(2, "Vol spike ≥ 1.5× bonus", minval = 0, maxval = 5, group = gQualityW)
-wManipPassed = input.int(2, "T1: 2nd entry / manip passed bonus", minval = 0, maxval = 5, group = gQualityW)
-wDisplaceStrong = input.int(2, "T2: displacement ≥ 2.0× ATR bonus", minval = 0, maxval = 5, group = gQualityW)
-wPdDeep = input.int(2, "T2: deep PD touch bonus", minval = 0, maxval = 5, group = gQualityW)
-wRrStrong = input.int(2, "RR ≥ 4 bonus (1 if ≥ 3)", minval = 0, maxval = 5, group = gQualityW)
-wAsiaWidePenalty = input.int(2, "Asia Wide penalty (T1 takes more)", minval = 0, maxval = 5, group = gQualityW, tooltip = "T1 gets -X, T2 gets -X/2 (T2 handles wide Asia better)")
+// Quality Gate — hardcoded (settings removed to save compiled tokens)
+conflictMode = "First wins (legacy v9.18 behaviour)"
+qualityMinScore = 6
+qualityWaitBars = 3
+wHtfAligned = 3
+wBodyStrong = 2
+wVolStrong  = 2
+wManipPassed = 2
+wDisplaceStrong = 2
+wPdDeep = 2
+wRrStrong = 2
+wAsiaWidePenalty = 2
 
 // =============================================================================
 // NY ENGINE (v9.8)
@@ -2967,9 +2964,6 @@ scoreT2Short(bool fire) =>
         s -= asiaTooWide ? math.round(wAsiaWidePenalty / 2) : 0
         s
 
-gradeFromScore(int score) =>
-    score >= 10 ? "A+" : score >= 8 ? "A" : score >= 6 ? "B" : score >= 5 ? "C" : "D"
-
 // Master gate — computes raw flags, scores, and gating in one shot
 // Returns: gated 4 flags + bestScore + conflictResolved + activeFlags + raw 4 flags
 runQualityGate(string mode, int minScore) =>
@@ -3015,15 +3009,6 @@ runQualityGate(string mode, int minScore) =>
 // === Single call from main body (minimal expressions) ===
 [fireLongAny, fireShortAny, fireT2LongAny, fireT2ShortAny, bestScore, conflictResolvedNow, modeQualityGate, modeT1Priority, anyRawFire] = runQualityGate(conflictMode, qualityMinScore)
 
-// Persist quality state across bars
-var int lastQualityScore = 0
-var string lastQualityGrade = ""
-var bool lastConflictResolved = false
-if (modeQualityGate or modeT1Priority) and anyRawFire
-    lastQualityScore := bestScore
-    lastQualityGrade := gradeFromScore(bestScore)
-    lastConflictResolved := conflictResolvedNow
-
 // =============================================================================
 // SL OVERRIDE FOR 1M FIRES (v9.7)
 // =============================================================================
@@ -3054,8 +3039,6 @@ finalT2ShortSlSrc = fireT2Short1m and oneMinUseChart ? "1m engulf" : fireT2Short
 // ENTRY LABELS
 // =============================================================================
 // v9.2: Stars removed — cleaner labels
-// v9.19: Quality score badge for all entry labels
-qualBadge = ""
 
 if fireLongAny
     isNyFireL = fireNyLong or fireNyLong1m
@@ -3074,7 +3057,7 @@ if fireLongAny
     tpSrcTxt = tpSrcDisplay != "" ? " @" + tpSrcDisplay : ""
     slSrcTxt = slShowSrcInLabel and slSrcDisplay != "" ? " (" + slSrcDisplay + ")" : ""
     if showLabels and (not isNyFireL or showNyEntryLabels)
-        label.new(bar_index, low, entryLabel + " [" + pathLong + "]\n" + sweptSrcDisplay + " Swept\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplay, "#.##") + "R" + manipBadge + warnBadge + qualBadge, color = entryColor, textcolor = color.white, style = label.style_label_up, size = size.tiny)
+        label.new(bar_index, low, entryLabel + " [" + pathLong + "]\n" + sweptSrcDisplay + " Swept\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplay, "#.##") + "R" + manipBadge + warnBadge, color = entryColor, textcolor = color.white, style = label.style_label_up, size = size.tiny)
     if showRrBox
         box.new(bar_index, close, bar_index + 25, tpP, bgcolor = color.new(bullColor, 85), border_color = color.new(bullColor, 40))
         box.new(bar_index, slP, bar_index + 25, close, bgcolor = color.new(bearColor, 85), border_color = color.new(bearColor, 40))
@@ -3098,7 +3081,7 @@ if fireShortAny
     tpSrcTxt = tpSrcDisplay != "" ? " @" + tpSrcDisplay : ""
     slSrcTxt = slShowSrcInLabel and slSrcDisplay != "" ? " (" + slSrcDisplay + ")" : ""
     if showLabels and (not isNyFireS or showNyEntryLabels)
-        label.new(bar_index, high, entryLabel + " [" + pathShort + "]\n" + sweptSrcDisplay + " Swept\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplay, "#.##") + "R" + manipBadge + warnBadge + qualBadge, color = entryColor, textcolor = color.white, style = label.style_label_down, size = size.tiny)
+        label.new(bar_index, high, entryLabel + " [" + pathShort + "]\n" + sweptSrcDisplay + " Swept\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplay, "#.##") + "R" + manipBadge + warnBadge, color = entryColor, textcolor = color.white, style = label.style_label_down, size = size.tiny)
     if showRrBox
         box.new(bar_index, tpP, bar_index + 25, close, bgcolor = color.new(bullColor, 85), border_color = color.new(bullColor, 40))
         box.new(bar_index, close, bar_index + 25, slP, bgcolor = color.new(bearColor, 85), border_color = color.new(bearColor, 40))
@@ -3122,7 +3105,7 @@ if fireT2LongAny
     tpSrcTxt = tpSrcDisplayT2L != "" ? " @" + tpSrcDisplayT2L : ""
     slSrcTxt = slShowSrcInLabel and slSrcDisplayT2L != "" ? " (" + slSrcDisplayT2L + ")" : ""
     if showLabels and (not isNyFireT2L or showNyEntryLabels)
-        label.new(bar_index, low, "▲ LONG T2 [AMD]" + nyTag + " " + profileLabelTag + tfTag + "\nSwept " + sweptSrcDisplayT2L + " → Retrace\n@" + t2LongZoneSrc + " in " + refRangeName + "\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplayT2L, "#.##") + "R" + warnBadge + qualBadge, color = entryColor, textcolor = color.white, style = label.style_label_up, size = size.tiny)
+        label.new(bar_index, low, "▲ LONG T2 [AMD]" + nyTag + " " + profileLabelTag + tfTag + "\nSwept " + sweptSrcDisplayT2L + " → Retrace\n@" + t2LongZoneSrc + " in " + refRangeName + "\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplayT2L, "#.##") + "R" + warnBadge, color = entryColor, textcolor = color.white, style = label.style_label_up, size = size.tiny)
     if showRrBox
         box.new(bar_index, close, bar_index + 25, tpP, bgcolor = color.new(bullColor, 85), border_color = color.new(bullColor, 40))
         box.new(bar_index, slP, bar_index + 25, close, bgcolor = color.new(bearColor, 85), border_color = color.new(bearColor, 40))
@@ -3146,7 +3129,7 @@ if fireT2ShortAny
     tpSrcTxt = tpSrcDisplayT2S != "" ? " @" + tpSrcDisplayT2S : ""
     slSrcTxt = slShowSrcInLabel and slSrcDisplayT2S != "" ? " (" + slSrcDisplayT2S + ")" : ""
     if showLabels and (not isNyFireT2S or showNyEntryLabels)
-        label.new(bar_index, high, "▼ SHORT T2 [AMD]" + nyTag + " " + profileLabelTag + tfTag + "\nSwept " + sweptSrcDisplayT2S + " → Retrace\n@" + t2ShortZoneSrc + " in " + refRangeNameS + "\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplayT2S, "#.##") + "R" + warnBadge + qualBadge, color = entryColor, textcolor = color.white, style = label.style_label_down, size = size.tiny)
+        label.new(bar_index, high, "▼ SHORT T2 [AMD]" + nyTag + " " + profileLabelTag + tfTag + "\nSwept " + sweptSrcDisplayT2S + " → Retrace\n@" + t2ShortZoneSrc + " in " + refRangeNameS + "\nSL: " + str.tostring(slP, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpP, format.mintick) + tpSrcTxt + "\n" + str.tostring(rrDisplayT2S, "#.##") + "R" + warnBadge, color = entryColor, textcolor = color.white, style = label.style_label_down, size = size.tiny)
     if showRrBox
         box.new(bar_index, tpP, bar_index + 25, close, bgcolor = color.new(bullColor, 85), border_color = color.new(bullColor, 40))
         box.new(bar_index, close, bar_index + 25, slP, bgcolor = color.new(bearColor, 85), border_color = color.new(bearColor, 40))
@@ -3730,11 +3713,7 @@ buildJsonAlert(string side, string trade, string sessionName, string tfTag, floa
     json += "\"engulf_body_pct\":" + str.tostring(engulfBodyPct, "#.##") + ","
     json += "\"vol_spike\":" + str.tostring(volSpike, "#.##") + ","
     json += "\"htf_aligned\":" + (htfAligned ? "true" : "false") + ","
-    // v9.19: NEW quality score fields
-    json += "\"quality_score\":" + str.tostring(lastQualityScore) + ","
-    json += "\"quality_grade\":\"" + lastQualityGrade + "\","
-    json += "\"conflict_resolved\":" + (lastConflictResolved ? "true" : "false") + ","
-    json += "\"version\":\"9.22\""
+    json += "\"version\":\"9.23\""
     json += "}"
     json
 
