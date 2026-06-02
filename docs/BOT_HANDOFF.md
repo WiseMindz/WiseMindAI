@@ -315,6 +315,20 @@ mounted at `/data`** (Settings → Volumes) so state persists across redeploys. 
 KNOWN LIMITATION (logged): daily-loss baseline = first equity the bot sees that day (lazy). Fine for demo;
 before funded, refine to the broker's true day-start balance (server-midnight) for exact prop-firm DD.
 
+## 5C. 🧠 PHASE 1 BRAIN — BUILD PROGRESS (resume here)
+Volume `/data` created on Railway ✅. Build order: memory → briefings → tools.
+- [x] **STEP 1 — Memory/Learning (DONE, tested, deployed):** `database.py` DB path now configurable
+  (`DATABASE_PATH` env → set `/data/trades.db` on Railway so history persists on the volume). New
+  `stats.py` (`compute_stats` reads `trade_results`; win rate, expectancy R/trade, total R, by
+  session/symbol, recent streak; `format_stats`, `build_review_prompt`). `bot.py` commands **`/stats`**
+  (numbers) + **`/review`** (Claude analyses history → data-backed recommendations, advisory only).
+  Tested locally (1 result → 100% WR, 5R). ⚠️ MUST set Railway var `DATABASE_PATH=/data/trades.db`.
+- [ ] **STEP 2 — Daily briefings:** 08:30 + 17:30 CEST (asyncio scheduler in bot.py; Claude posts
+  pre-London brief + post-NY review to TELEGRAM_CHAT_ID). NOT built yet.
+- [ ] **STEP 3 — Tool agency:** Claude tool-calling in the Telegram handler — read-only (get_positions/
+  get_stats/get_account) automatic; **ALL write/actions (close, pause, anything) require Michael's
+  explicit approval before executing** (per Michael). NOT built yet.
+
 ## 5B. WISEMIND HQ INTEGRATION + PRODUCT / SELLABILITY ROADMAP (vision — keep current)
 
 ### WiseMind HQ — how it connects today
@@ -370,6 +384,12 @@ strategy:
 GUARDRAILS (hard): LLM ADVISES, deterministic rules EXECUTE; the edge is the Pine strategy, not the LLM;
 never let it override entry/SL/TP or invent data; Michael approves any rule change; no self-mutating ML.
 **Michael wants: daily briefings + memory/learning loop + tool agency (and the full improvement plan).**
+**Phase 1 CONFIRMED params (build order: memory → briefings → tools; build only after volume is set up):**
+- Daily briefings: **08:30 morning / 17:30 evening CEST** (before London / after NY).
+- Tool agency: read-only (positions/stats/account) is automatic; **EVERY write/action the agent wants to
+  take requires Michael's explicit approval before it executes** (close, pause, any change). Approval-gated.
+- Memory/learning DB + trade journal must live on the **/data volume** (persist across redeploys) — so the
+  Railway volume setup is the prerequisite and must be done first.
 
 ### 📚 FULL IMPROVEMENT CATALOG (everything that would make the bot better — Michael asked for all of it)
 1. **Safety/governance (DO BEFORE FUNDED):** Telegram kill-switch `/pause` `/resume`; error alerting

@@ -1,8 +1,11 @@
+import os
 import aiosqlite
 from datetime import datetime
 from typing import Optional, List
 
-DB_PATH = "trades.db"
+# DB path is configurable so it can live on the Railway /data volume (persists
+# across redeploys). Local default = trades.db in the project dir.
+DB_PATH = os.getenv("DATABASE_PATH", "trades.db")
 
 
 async def init_db():

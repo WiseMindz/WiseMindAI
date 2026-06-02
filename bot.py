@@ -414,6 +414,45 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
+# ── Phase 1 Brain: memory / learning ──────────────────────────────────────────
+import stats as _stats
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show performance stats (win rate, expectancy, by session/symbol)."""
+    s = await _stats.compute_stats()
+    await update.message.reply_text(_stats.format_stats(s), parse_mode="HTML")
+
+
+async def cmd_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Claude analyzes the trade history and gives data-backed recommendations (advisory)."""
+    s = await _stats.compute_stats()
+    if s["total"] == 0:
+        await update.message.reply_text("📭 No completed trades yet — nothing to review.")
+        return
+    await update.message.reply_text("🧠 Analyzing your trade history...")
+    facts = _stats.build_review_prompt(s)
+    prompt = (
+        "Here are the trader's REAL completed-trade stats (do not invent any numbers; "
+        "only reason from these facts):\n\n" + facts + "\n\n"
+        "Give a short, honest performance review: what's working, what's leaking, and 2-3 "
+        "concrete data-backed recommendations. Be direct. These are SUGGESTIONS the trader "
+        "approves — never claim to change settings yourself. Keep it concise."
+    )
+    try:
+        resp = await claude.messages.create(
+            model=CLAUDE_MODEL_SMART,
+            max_tokens=700,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+        await update.message.reply_text("🧠 <b>Performance Review</b>\n\n" + text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"/review failed: {e}")
+        await update.message.reply_text("⚠️ Review failed — try again shortly.")
+
+
 async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/last from user {update.effective_user.id}")
     try:
@@ -587,6 +626,8 @@ async def run_bot_and_webhook():
     bot_app.add_handler(CommandHandler("pause", cmd_pause))
     bot_app.add_handler(CommandHandler("resume", cmd_resume))
     bot_app.add_handler(CommandHandler("status", cmd_status))
+    bot_app.add_handler(CommandHandler("stats", cmd_stats))
+    bot_app.add_handler(CommandHandler("review", cmd_review))
     bot_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     bot_app.add_error_handler(error_handler)
