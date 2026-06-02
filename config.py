@@ -75,6 +75,11 @@ ADMIN_USER_ID      = get_int_env("ADMIN_USER_ID", default=0)        # Telegram u
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0"))    # auto-stop at -X% equity for the day (0 = off)
 ERROR_ALERTS       = os.getenv("ERROR_ALERTS", "true").lower() == "true"  # Telegram ping on failed order / disconnect
 
+# ── Phase 1 Brain: daily briefings ─────────────────────────────────────────────
+BRIEFINGS_ENABLED  = os.getenv("BRIEFINGS_ENABLED", "true").lower() == "true"
+BRIEF_MORNING      = os.getenv("BRIEF_MORNING", "08:30")   # CEST pre-London
+BRIEF_EVENING      = os.getenv("BRIEF_EVENING", "17:30")   # CEST post-NY
+
 # Legacy MetaAPI vars (kept so config doesn't break if still in .env)
 METAAPI_TOKEN      = os.getenv("METAAPI_TOKEN", "")
 METAAPI_ACCOUNT_ID = os.getenv("METAAPI_ACCOUNT_ID", "")

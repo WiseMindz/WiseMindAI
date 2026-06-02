@@ -453,6 +453,13 @@ async def cmd_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Review failed — try again shortly.")
 
 
+async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fire a morning brief on demand (for testing the daily briefing)."""
+    import briefings
+    await briefings._send_brief("morning", context.bot, claude, SYSTEM_PROMPT,
+                                CLAUDE_MODEL_SMART, update.effective_chat.id)
+
+
 async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/last from user {update.effective_user.id}")
     try:
@@ -628,6 +635,7 @@ async def run_bot_and_webhook():
     bot_app.add_handler(CommandHandler("status", cmd_status))
     bot_app.add_handler(CommandHandler("stats", cmd_stats))
     bot_app.add_handler(CommandHandler("review", cmd_review))
+    bot_app.add_handler(CommandHandler("brief", cmd_brief))
     bot_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     bot_app.add_error_handler(error_handler)
@@ -650,6 +658,15 @@ async def run_bot_and_webhook():
     await bot_app.start()
     await bot_app.updater.start_polling(drop_pending_updates=True)
     logger.info("✅ Telegram bot polling started")
+
+    # 4b. Start the daily briefings scheduler (Phase 1 brain)
+    from config import BRIEFINGS_ENABLED, BRIEF_MORNING, BRIEF_EVENING, TELEGRAM_CHAT_ID, DAY_RESET_TZ
+    if BRIEFINGS_ENABLED:
+        import briefings
+        asyncio.create_task(briefings.run_briefings(
+            bot_app.bot, claude, SYSTEM_PROMPT, CLAUDE_MODEL_SMART,
+            TELEGRAM_CHAT_ID, DAY_RESET_TZ, BRIEF_MORNING, BRIEF_EVENING,
+        ))
 
     # 5. Run uvicorn forever (this blocks until shutdown)
     logger.info("🌐 Webhook server starting (uvicorn.serve)...")
