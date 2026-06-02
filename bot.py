@@ -460,6 +460,48 @@ async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 CLAUDE_MODEL_SMART, update.effective_chat.id)
 
 
+# ── Phase 1 Brain: tool agency ────────────────────────────────────────────────
+import agent_tools as _agent
+
+
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Read-only agent: Claude can check positions/account/stats to answer your question."""
+    q = " ".join(context.args).strip()
+    if not q:
+        await update.message.reply_text("Ask about your account or performance, e.g.\n/ask how am I doing today?")
+        return
+    await update.message.reply_text("🤔 Checking...")
+    try:
+        ans = await _agent.run_agent(claude, CLAUDE_MODEL_SMART, SYSTEM_PROMPT, q)
+        await update.message.reply_text(ans)
+    except Exception as e:
+        logger.error(f"/ask failed: {e}")
+        await update.message.reply_text("⚠️ Couldn't complete that — try again.")
+
+
+async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-gated close (your command = your approval). /close [SYMBOL|all]"""
+    if not _is_admin(update):
+        await update.message.reply_text("🚫 Not authorized. Only the admin can close trades.")
+        return
+    arg = (context.args[0].upper() if context.args else "ALL")
+    positions = await _mt5.get_open_positions()
+    if not positions:
+        await update.message.reply_text("📭 No open positions.")
+        return
+    targets = positions if arg in ("ALL", "") else [p for p in positions if arg in (p.get("symbol") or "").upper()]
+    if not targets:
+        await update.message.reply_text(f"No open {arg} positions.")
+        return
+    closed = []
+    for p in targets:
+        r = await _mt5.close_position_by_id(p["id"])
+        if r.get("success"):
+            closed.append(f"{p['symbol']} {p['type']} {p['volume']}")
+    await update.message.reply_text(f"✅ Closed {len(closed)}/{len(targets)}:\n" + "\n".join(closed) if closed
+                                    else "⚠️ Could not close (check logs).")
+
+
 async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/last from user {update.effective_user.id}")
     try:
@@ -636,6 +678,8 @@ async def run_bot_and_webhook():
     bot_app.add_handler(CommandHandler("stats", cmd_stats))
     bot_app.add_handler(CommandHandler("review", cmd_review))
     bot_app.add_handler(CommandHandler("brief", cmd_brief))
+    bot_app.add_handler(CommandHandler("ask", cmd_ask))
+    bot_app.add_handler(CommandHandler("close", cmd_close))
     bot_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     bot_app.add_error_handler(error_handler)

@@ -93,6 +93,45 @@ async def get_account_equity() -> Optional[float]:
         return None
 
 
+async def get_account_info() -> dict:
+    """Balance / equity / currency snapshot for the agent (read-only)."""
+    if not _connected or _connection is None:
+        return {"error": "MetaAPI not connected"}
+    try:
+        info = await _connection.get_account_information()
+        return {"balance": info.get("balance"), "equity": info.get("equity"),
+                "currency": info.get("currency"), "server": info.get("server")}
+    except Exception as e:
+        return {"error": str(e)[:120]}
+
+
+async def get_open_positions() -> list:
+    """Simplified open-positions list for the agent (read-only)."""
+    if not _connected or _connection is None:
+        return []
+    try:
+        positions = await _connection.get_positions()
+        return [{"id": str(p.get("id")), "symbol": p.get("symbol"),
+                 "type": "BUY" if "BUY" in str(p.get("type", "")).upper() else "SELL",
+                 "volume": p.get("volume"), "openPrice": p.get("openPrice"),
+                 "stopLoss": p.get("stopLoss"), "takeProfit": p.get("takeProfit"),
+                 "profit": p.get("profit")} for p in positions]
+    except Exception as e:
+        logger.error(f"get_open_positions failed: {str(e)[:120]}")
+        return []
+
+
+async def close_position_by_id(position_id: str) -> dict:
+    """Close one position by id (write action — caller must gate with approval)."""
+    if not _connected or _connection is None:
+        return {"success": False, "error": "MetaAPI not connected"}
+    try:
+        await _connection.close_position(str(position_id))
+        return {"success": True, "closed": str(position_id)}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:120]}
+
+
 # ── Grade filter ──────────────────────────────────────────────────────────────
 
 def should_execute(rating: str, min_grade: str) -> bool:
