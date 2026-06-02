@@ -1,21 +1,21 @@
 """
 Webhook handler för TradingView-alerts.
-Tar emot JSON från Pine Script v9.22+, sparar i DB, postar till Telegram,
-och exekverar trades automatiskt på MT5 via MetaAPI.
+Tar emot JSON från Pine Script v9.25+, sparar i DB, postar till Telegram,
+och exekverar trades automatiskt på MT5 via File Bridge EA.
 
-v9.22 schema adds:
-- quality_score (int 0-100, Pine-computed)
-- quality_grade ("A+" | "B" | "C", Pine-computed)
-- tf_type ("5m" | "1m", explicit TF tag)
-- conflict_resolved (bool, HTF/LTF conflict was resolved)
-- version ("9.22")
+Execution flow (File Bridge — no MetaAPI needed):
+  Pine alert → webhook → score → write signal file → WiseMindBridge.mq5 → MT5
+
+Supports: Wise London v1.0 + Wise NY v2.0 — both sessions, all assets.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from typing import Optional
 import re
+import httpx
 from telegram import Bot
 from config import (
     TELEGRAM_BOT_TOKEN,
@@ -28,30 +28,50 @@ from config import (
     MT5_EXECUTION_ENABLED,
     MT5_DRY_RUN,
     MT5_MIN_GRADE,
+    BE_ENABLED,
+    BE_TRIGGER_R,
+    BE_BUFFER_PIPS,
+    BE_POLL_SECONDS,
+    EXPIRY_ENABLED,
+    EXPIRY_HOURS,
+    MAX_TRADES_PER_DAY,
+    DAY_RESET_TZ,
 )
-from database import save_trade, save_trade_result, get_monthly_stats, save_message
+from database import save_trade, save_message
 from signal_utils import evaluate_signal
 import mt5_executor
+import daily_limit
+
+# WiseMind HQ forwarding — set WISEMIND_HQ_URL in .env if needed
+WISEMIND_HQ_URL = os.getenv("WISEMIND_HQ_URL", "")
 
 logger = logging.getLogger(__name__)
 
 
-# ── FastAPI lifespan (MetaAPI connect / disconnect) ───────────────────────────
+# ── FastAPI lifespan ──────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — connect to MetaAPI
     if MT5_EXECUTION_ENABLED:
         logger.info("MetaAPI: initializing MT5 connection...")
         ok = await mt5_executor.init_connection(METAAPI_TOKEN, METAAPI_ACCOUNT_ID)
         if not ok:
             logger.warning("⚠️  MetaAPI init failed — webhook will run WITHOUT MT5 execution")
+        elif BE_ENABLED or EXPIRY_ENABLED:
+            # Position monitor = breakeven (SL→entry at trigger_r) + time-expiry (auto-close)
+            be_trigger = BE_TRIGGER_R if BE_ENABLED else 10_000.0   # huge = effectively off
+            exp_hours  = EXPIRY_HOURS if EXPIRY_ENABLED else 0.0     # 0 = off
+            mt5_executor.start_position_monitor(be_trigger, BE_BUFFER_PIPS, exp_hours, BE_POLL_SECONDS)
+        else:
+            logger.info("Position monitor disabled (BE_ENABLED=false, EXPIRY_ENABLED=false)")
     elif MT5_DRY_RUN:
-        logger.info("MetaAPI: DRY RUN mode — trades will be logged but NOT sent to MT5")
+        logger.info("🔬 MT5 DRY RUN mode — trades logged but NOT sent to MetaAPI")
     else:
-        logger.info("MetaAPI: execution disabled (set MT5_EXECUTION_ENABLED=true to enable)")
+        logger.info("MT5 execution disabled — set MT5_EXECUTION_ENABLED=true in .env to enable")
     yield
     # Shutdown
+    mt5_executor.stop_position_monitor()
     await mt5_executor.close_connection()
 
 
@@ -248,6 +268,18 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
         flags.append("✓ AFTER MANIPULATION")
     if htf_aligned:
         flags.append("✓ HTF ALIGNED")
+    if data.get("fvg_nearby", False):
+        flags.append("✦ FVG CONFIRMED")
+    if data.get("consolidation", False):
+        flags.append("⚠ CONSOLIDATION")
+    # v9.25: Signal grade from 223-chart analysis
+    sig_grade = data.get("signal_grade", "")
+    if sig_grade:
+        grade_emoji = "🟢" if sig_grade == "A+" else ("🟡" if sig_grade == "A" else ("🟠" if sig_grade == "B" else "🔴"))
+        flags.append(f"{grade_emoji} GRADE {sig_grade}")
+    htf_mode = data.get("htf_mode", "")
+    if htf_mode and htf_mode != "Off":
+        flags.append(f"HTF: {htf_mode}")
     if conflict_resolved:
         flags.append("✓ CONFLICT RESOLVED")
     if asia_wide:
@@ -258,7 +290,8 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
     rating = evaluation.get("rating", "?")
     score = evaluation.get("score", 0)
     pine_scored = evaluation.get("pine_scored", False)
-    rating_emoji = "🟢" if rating == "A+" else ("🟡" if rating == "B" else "🔴")
+    # 4-tier emoji (A+/A green, B yellow, C red)
+    rating_emoji = {"A+": "🟢", "A": "🟢", "B": "🟡", "C": "🔴"}.get(rating, "🔴")
 
     # Show Pine's raw 0-100 score when available, else /10
     if pine_scored and data.get("quality_score") is not None:
@@ -281,6 +314,8 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
             msg += f"🔬 <i>DRY RUN — would execute {lot_calc['lot']} lots (grade {exec_result.get('grade', '?')})</i>\n"
         elif exec_result.get("skipped"):
             msg += f"⏭️ <i>MT5 skipped — grade {exec_result.get('grade','?')} below min {exec_result.get('min_grade','?')}</i>\n"
+        elif exec_result.get("daily_limit"):
+            msg += f"⛔ <b>Daily limit reached</b> ({exec_result.get('used','?')}/{exec_result.get('max','?')}) — <i>signal logged, NOT traded</i>\n"
         elif exec_result.get("success") is True:
             entry_px = exec_result.get("entry_price", "")
             order_id = exec_result.get("order_id", "")
@@ -425,31 +460,52 @@ async def receive_webhook(request: Request):
         evaluation = evaluate_signal(data)
         logger.info(f"Signal evaluation: {evaluation['rating']} ({evaluation['score']}/10)")
 
-        # ── MT5 Auto-Execution ────────────────────────────────────────────────
+        # ── MT5 Auto-Execution (MetaAPI) ──────────────────────────────────────
         exec_result = None
-        grade = evaluation.get("rating", "C")
+        grade   = evaluation.get("rating", "C")
+        session = data.get("session", "")
 
         if MT5_DRY_RUN:
-            # Dry run: log everything, send nothing
-            exec_result = {
-                "success": None,  # None = dry run
-                "dry_run": True,
-                "lot": lot_calc["lot"],
-                "grade": grade,
-            }
-            logger.info(f"🔬 DRY RUN: would execute {data['side']} {lot_calc['lot']} {data['symbol']} (grade {grade})")
+            exec_result = {"success": None, "dry_run": True, "lot": lot_calc["lot"], "grade": grade}
+            logger.info(f"🔬 DRY RUN: would execute → {data['side']} {lot_calc['lot']} {data['symbol']} [{session}] (grade {grade})")
 
         elif MT5_EXECUTION_ENABLED:
             if mt5_executor.should_execute(grade, MT5_MIN_GRADE):
-                logger.info(f"Executing on MT5: {data['side']} {lot_calc['lot']} {data['symbol']} (grade {grade})")
-                exec_result = await mt5_executor.execute_trade(
-                    symbol  = data["symbol"],
-                    side    = data["side"],
-                    lot     = lot_calc["lot"],
-                    sl      = float(data["sl"]),
-                    tp      = float(data["tp"]),
-                    comment = f"WiseMind v9.22 {grade}",
-                )
+                # ── Daily trade cap (strict global limit) ─────────────────────
+                # Hold the lock across check→execute→record so two near-simultaneous
+                # signals can never both slip past the cap.
+                async with daily_limit.LOCK:
+                    used = daily_limit.count_today(DAY_RESET_TZ)
+                    if used >= MAX_TRADES_PER_DAY:
+                        exec_result = {"success": None, "daily_limit": True,
+                                       "used": used, "max": MAX_TRADES_PER_DAY}
+                        logger.info(f"⛔ Daily cap reached ({used}/{MAX_TRADES_PER_DAY}) — signal NOT traded")
+                    else:
+                        logger.info(f"Executing on MT5: {data['side']} {lot_calc['lot']} {data['symbol']} [{session}] (grade {grade}) — {used+1}/{MAX_TRADES_PER_DAY} today")
+                        exec_result = await mt5_executor.execute_trade(
+                            symbol  = data["symbol"],
+                            side    = data["side"],
+                            lot     = lot_calc["lot"],
+                            sl      = float(data["sl"]),
+                            tp      = float(data["tp"]),
+                            comment = f"WiseMind {session} {grade}",
+                        )
+                        if exec_result and exec_result.get("success"):
+                            # Count this trade against today's cap (only real fills count)
+                            new_count = daily_limit.record(DAY_RESET_TZ)
+                            logger.info(f"Daily count now {new_count}/{MAX_TRADES_PER_DAY}")
+                            # Exact-settings parity: per-position settings from Pine (fallback to .env)
+                            if exec_result.get("order_id"):
+                                def _num(v):
+                                    try:
+                                        return float(v) if v is not None else None
+                                    except (TypeError, ValueError):
+                                        return None
+                                mt5_executor.register_position_settings(
+                                    order_id     = exec_result["order_id"],
+                                    be_trigger_r = _num(data.get("be_trigger_r")),
+                                    expiry_hours = _num(data.get("expiry_hours")),
+                                )
             else:
                 exec_result = {"success": None, "skipped": True, "grade": grade, "min_grade": MT5_MIN_GRADE}
                 logger.info(f"⏭️  MT5 skipped — grade {grade} < min {MT5_MIN_GRADE}")
@@ -464,7 +520,8 @@ async def receive_webhook(request: Request):
                 f"{data.get('trade', '')} | {data.get('session', '')} | RR:{data.get('rr', 0)} | Lot:{lot_calc['lot']} | "
                 f"Swept:{data.get('swept', '')} | DispATR:{data.get('displacement_atr', 0)} | "
                 f"EngulfPct:{data.get('engulf_body_pct', 0)} | VolSpike:{data.get('vol_spike', 0)} | "
-                f"HTF:{data.get('htf_aligned', False)} | AfterManip:{data.get('after_manipulation', False)} | "
+                f"HTF:{data.get('htf_aligned', False)} | FVG:{data.get('fvg_nearby', False)} | "
+                f"Consol:{data.get('consolidation', False)} | AfterManip:{data.get('after_manipulation', False)} | "
                 f"AsiaWide:{data.get('asia_wide', False)} | TF:{data.get('tf', '')} | TFType:{data.get('tf_type', '')} | "
                 f"ConflictResolved:{data.get('conflict_resolved', False)} | Ver:{data.get('version', '')} | "
                 f"{pine_score_str}Rating:{evaluation['rating']} | Score:{evaluation['score']}/10"
@@ -525,6 +582,20 @@ async def receive_webhook(request: Request):
         # If ALL chats failed, escalate
         if all(r["status"].startswith("error") for r in post_results):
             raise HTTPException(status_code=500, detail=f"All Telegram broadcasts failed: {post_results}")
+
+        # ── Forward to WiseMind HQ dashboard ─────────────────────────────────
+        if WISEMIND_HQ_URL:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{WISEMIND_HQ_URL}/webhook",
+                        json=data,
+                        timeout=5,
+                    )
+                logger.info(f"Forwarded signal to WiseMind HQ")
+            except Exception as e:
+                logger.warning(f"HQ forward failed (non-critical): {e}")
+        # ── End HQ forwarding ────────────────────────────────────────────────
 
         return {
             "status": "ok",
@@ -634,6 +705,20 @@ async def handle_trade_result(data: dict):
         )
     except Exception as e:
         logger.error(f"Failed to save result summary: {e}")
+
+    # ── Forward trade result to WiseMind HQ dashboard ────────────────────
+    if WISEMIND_HQ_URL:
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"{WISEMIND_HQ_URL}/webhook",
+                    json=data,
+                    timeout=5,
+                )
+            logger.info(f"Forwarded trade result to WiseMind HQ")
+        except Exception as e:
+            logger.warning(f"HQ result forward failed (non-critical): {e}")
+    # ── End HQ forwarding ────────────────────────────────────────────────
 
     return {
         "status": "ok",

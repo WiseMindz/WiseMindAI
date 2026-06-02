@@ -1,0 +1,844 @@
+//@version=6
+// =============================================================================
+// WiseMind APEX v1.1 — Multi-Symbol CRT + PO3 + SMC + ICT
+// =============================================================================
+// v1.1: Multi-symbol (XAUUSD, EURUSD, US100) + v9.22-style trade visuals
+//
+// 5 LAYERS REQUIRED FOR A+ SIGNAL:
+//   1. HTF 4H directional (not ranging)
+//   2. Session killzone active (London 03:00-05:15 or NY 08:30-11:00 CET)
+//   3. Liquidity sweep (Asia H/L or London H/L)
+//   4. MSS — Market Structure Shift (close beyond CHoCH after sweep)
+//   5. CRT trigger — 3-candle: range -> sweep -> delivery touching PD array
+//
+// SL: Beyond CRT sweep candle extreme + ATR buffer
+// TP: Next session liquidity (minimum 2.5R, target 4R+)
+// Bot: Same JSON webhook schema as wisemind-ai (secret, version, quality_score)
+// =============================================================================
+
+indicator("WiseMind APEX v1.1", "APEX v1.1", overlay = true,
+     max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+WEBHOOK_SECRET = "wisemind2026"
+
+// =============================================================================
+// SYMBOL AUTO-PROFILE — Auto-tunes for XAUUSD / EURUSD / US100
+// =============================================================================
+gSymbol = "◆ Symbol Auto-Profile"
+autoDetectProfile = input.bool(true, "Auto-detect symbol profile", group = gSymbol, tooltip = "Reads ticker: XAUUSD/GOLD → XAU, EURUSD → EUR, NAS100/US100/USTEC → NAS. Else → Custom.")
+profileOverride = input.string("Auto", "Override profile", options = ["Auto", "Force XAUUSD", "Force EURUSD", "Force US100", "Custom (use manual values)"], group = gSymbol, tooltip = "Force a profile regardless of ticker. Custom = your manual input values.")
+
+symUpper = str.upper(syminfo.ticker)
+isXauSym = str.contains(symUpper, "XAU") or str.contains(symUpper, "GOLD")
+isEurSym = str.contains(symUpper, "EURUSD") or str.contains(symUpper, "EUR/USD")
+isNasSym = str.contains(symUpper, "NAS100") or str.contains(symUpper, "US100") or str.contains(symUpper, "USTEC") or str.contains(symUpper, "NDX")
+
+profileMode = profileOverride == "Force XAUUSD" ? "XAU" : profileOverride == "Force EURUSD" ? "EUR" : profileOverride == "Force US100" ? "NAS" : profileOverride == "Custom (use manual values)" or not autoDetectProfile ? "CUSTOM" : isXauSym ? "XAU" : isEurSym ? "EUR" : isNasSym ? "NAS" : "CUSTOM"
+
+useXauPreset = profileMode == "XAU"
+useEurPreset = profileMode == "EUR"
+useNasPreset = profileMode == "NAS"
+useCustom    = profileMode == "CUSTOM"
+
+profileDisplayTag = useXauPreset ? "XAU" : useEurPreset ? "EUR" : useNasPreset ? "NAS" : "CUSTOM"
+profileLabelTag   = useXauPreset ? "[XAU]" : useEurPreset ? "[EUR]" : useNasPreset ? "[NAS]" : "[CUSTOM]"
+profileSourceTag  = autoDetectProfile and profileOverride == "Auto" ? "AUTO" : profileOverride == "Custom (use manual values)" or not autoDetectProfile ? "MANUAL" : "FORCED"
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+gSess = "Sessions (CET Broker Time)"
+asiaSess   = input.session("2000-0000", "Asia (CET)",            group = gSess)
+londonSess = input.session("0300-0515", "London Killzone (CET)", group = gSess)
+nySess     = input.session("0830-1100", "NY Killzone (CET)",     group = gSess)
+
+gSessVis = "Session Colors"
+showAsiaBox   = input.bool(true,  "Asia Box",   group = gSessVis, inline = "a")
+asiaColor     = input.color(color.new(#8e44ad, 88), "", group = gSessVis, inline = "a")
+showLondonBox = input.bool(true,  "London Box", group = gSessVis, inline = "b")
+londonColor   = input.color(color.new(#2980b9, 88), "", group = gSessVis, inline = "b")
+showNYBox     = input.bool(true,  "NY Box",     group = gSessVis, inline = "c")
+nyColor       = input.color(color.new(#95a5a6, 90), "", group = gSessVis, inline = "c")
+
+gHtf = "HTF Bias Filter"
+htfBiasTF      = input.timeframe("240", "Primary HTF (4H)", options = ["60","240","D"], group = gHtf)
+htfConfTF      = input.timeframe("60",  "Confirm HTF (1H)", options = ["30","60","240"], group = gHtf)
+htfLookback    = input.int(20, "HTF Lookback Bars", minval = 10, maxval = 50, group = gHtf)
+htfMinScore    = input.float(0.20, "HTF Trend Min Score (0-1)", minval = 0.05, maxval = 0.90, step = 0.05, group = gHtf)
+requireBothHTF = input.bool(false, "Require BOTH 4H + 1H agree", group = gHtf)
+
+gCrt = "CRT Engine (Candle Range Theory)"
+enableCrt       = input.bool(true, "Enable CRT trigger", group = gCrt)
+crtBodyPct      = input.float(0.72, "CRT Delivery Min Body % (Custom)", minval = 0.50, maxval = 0.95, step = 0.05, group = gCrt, tooltip = "Used when profile=Custom. XAU=0.72, EUR=0.70, NAS=0.68")
+crtSweepWickAtr = input.float(0.10, "CRT Sweep Wick Min x ATR (Custom)", minval = 0.05, maxval = 0.50, step = 0.05, group = gCrt, tooltip = "Used when profile=Custom. XAU=0.10, EUR=0.08, NAS=0.12")
+crtMaxLookback  = input.int(3, "Max bars C1 to C3", minval = 2, maxval = 6, group = gCrt)
+
+gMss = "Market Structure (MSS / CHoCH)"
+enableMss    = input.bool(true, "Require MSS after sweep", group = gMss)
+mssBodyPct   = input.float(0.65, "MSS Candle Min Body % (Custom)", minval = 0.40, maxval = 0.90, step = 0.05, group = gMss, tooltip = "Used when profile=Custom. XAU=0.65, EUR=0.60, NAS=0.62")
+mssLookback  = input.int(10, "Structure swing lookback", minval = 5, maxval = 30, group = gMss)
+showMssLines = input.bool(true, "Show MSS lines", group = gMss)
+mssColor     = input.color(color.new(#f39c12, 20), "MSS Color", group = gMss)
+
+gSwp = "Sweep Detection"
+sweepAsia      = input.bool(true, "Sweep Asia H/L",   group = gSwp, inline = "s1")
+sweepLondon    = input.bool(true, "Sweep London H/L", group = gSwp, inline = "s1")
+requireClose   = input.bool(true, "Sweep close back through level", group = gSwp)
+sweepLookback  = input.int(80, "Max bars after Asia", minval = 20, maxval = 200, group = gSwp)
+showSweepLines = input.bool(true, "Show Sweep Lines", group = gSwp)
+sweepAsiaColor = input.color(color.new(#e74c3c, 15), "Asia Sweep Color",   group = gSwp, inline = "sc")
+sweepLonColor  = input.color(color.new(#2980b9, 15), "London Sweep Color", group = gSwp, inline = "sc")
+
+gFvg = "FVG — Fair Value Gaps"
+showFvg         = input.bool(true, "Show FVGs", group = gFvg)
+fvgMinTicks     = input.int(8, "Min FVG size ticks (Custom)", minval = 2, maxval = 200, group = gFvg, tooltip = "Used when profile=Custom. XAU=8, EUR=3, NAS=50")
+fvgDeleteFilled = input.bool(true, "Delete filled FVGs", group = gFvg)
+maxFvgs         = input.int(5, "Max active FVGs", minval = 2, maxval = 10, group = gFvg)
+bullFvgColor    = input.color(color.new(#26a69a, 82), "Bull FVG", group = gFvg, inline = "fc")
+bearFvgColor    = input.color(color.new(#ef5350, 82), "Bear FVG", group = gFvg, inline = "fc")
+
+gOb = "Order Blocks"
+showOb      = input.bool(true, "Show OBs", group = gOb)
+obMinAtr    = input.float(1.2, "Min displacement x ATR (Custom)", minval = 0.5, step = 0.1, group = gOb, tooltip = "Used when profile=Custom. XAU=1.2, EUR=1.25, NAS=1.3")
+maxObs      = input.int(3, "Max active OBs", minval = 1, maxval = 6, group = gOb)
+bullObColor = input.color(color.new(#26a69a, 78), "Bull OB", group = gOb, inline = "oc")
+bearObColor = input.color(color.new(#ef5350, 78), "Bear OB", group = gOb, inline = "oc")
+
+gQual = "Signal Quality Gate"
+minQualScore  = input.int(3, "Min layers required (1-5)", minval = 1, maxval = 5, group = gQual)
+enableVolConf = input.bool(true, "Require volume spike", group = gQual)
+volMultMin    = input.float(1.15, "Min vol spike x avg (Custom)", minval = 0.8, maxval = 3.0, step = 0.05, group = gQual, tooltip = "Used when profile=Custom. XAU=1.15, EUR=1.20, NAS=1.15")
+maxAsiaRange  = input.float(3500.0, "Block Asia range > N ticks (Custom)", minval = 100, step = 100, group = gQual, tooltip = "Used when profile=Custom. XAU=3500, EUR=500, NAS=15000")
+maxSignals    = input.int(2, "Max signals per day", minval = 1, maxval = 5, group = gQual)
+maxLondon     = input.int(1, "Max signals London", minval = 1, maxval = 3, group = gQual)
+maxNY         = input.int(1, "Max signals NY", minval = 1, maxval = 2, group = gQual)
+
+gTrade = "SL / TP Engine"
+slBufferTicks = input.float(15.0, "SL Buffer ticks (Custom)", minval = 1, step = 5, group = gTrade, tooltip = "Used when profile=Custom. XAU=15, EUR=5, NAS=50")
+slMinAtr      = input.float(0.50, "SL Min Distance x ATR (Custom)", minval = 0.10, step = 0.05, group = gTrade, tooltip = "Used when profile=Custom. XAU=0.50, EUR=0.40, NAS=0.60")
+minRR         = input.float(2.5, "Min RR", minval = 1.0, step = 0.5, group = gTrade)
+maxRR         = input.float(6.0, "Max RR cap", minval = 3.0, step = 0.5, group = gTrade)
+tpBufferTicks = input.float(3.0, "TP Buffer ticks", minval = 0, step = 1, group = gTrade)
+showRrBox     = input.bool(true, "Show SL/TP Boxes", group = gTrade)
+slShowSrcInLabel = input.bool(true, "Show SL source in label", group = gTrade)
+
+gLiq = "External Liquidity"
+showPDH  = input.bool(true,  "PDH/PDL", group = gLiq, inline = "d1")
+pdhColor = input.color(color.new(#e74c3c, 40), "", group = gLiq, inline = "d1")
+showPDL  = input.bool(true,  "", group = gLiq, inline = "d1")
+pdlColor = input.color(color.new(#3498db, 40), "", group = gLiq, inline = "d1")
+showPWH  = input.bool(false, "PWH/PWL", group = gLiq, inline = "w1")
+pwhColor = input.color(color.new(#c0392b, 30), "", group = gLiq, inline = "w1")
+showPWL  = input.bool(false, "", group = gLiq, inline = "w1")
+pwlColor = input.color(color.new(#2471a3, 30), "", group = gLiq, inline = "w1")
+
+gVis = "Visuals"
+showLabels  = input.bool(true,  "Entry Labels",             group = gVis)
+showDash    = input.bool(true,  "Dashboard",                group = gVis)
+bullColor   = input.color(#26a69a, "Bull Color",            group = gVis, inline = "vc")
+bearColor   = input.color(#ef5350, "Bear Color",            group = gVis, inline = "vc")
+showQuality = input.bool(true,  "Show quality score label", group = gVis)
+
+gAlert = "Alerts"
+enableAlerts = input.bool(true, "Enable alerts (webhook JSON)", group = gAlert)
+
+// =============================================================================
+// PROFILE VALUE RESOLUTION
+// =============================================================================
+// When a profile is active, these override manual input values.
+// When Custom, the user's manual values pass through directly.
+pMaxAsiaRange    = useCustom ? maxAsiaRange    : useXauPreset ? 3500.0  : useEurPreset ? 500.0  : 15000.0
+pFvgMinTicks     = useCustom ? fvgMinTicks     : useXauPreset ? 8       : useEurPreset ? 3      : 50
+pObMinAtr        = useCustom ? obMinAtr        : useXauPreset ? 1.2     : useEurPreset ? 1.25   : 1.3
+pCrtBodyPct      = useCustom ? crtBodyPct      : useXauPreset ? 0.72    : useEurPreset ? 0.70   : 0.68
+pCrtSweepWickAtr = useCustom ? crtSweepWickAtr : useXauPreset ? 0.10    : useEurPreset ? 0.08   : 0.12
+pMssBodyPct      = useCustom ? mssBodyPct      : useXauPreset ? 0.65    : useEurPreset ? 0.60   : 0.62
+pSlBufferTicks   = useCustom ? slBufferTicks   : useXauPreset ? 15.0    : useEurPreset ? 5.0    : 50.0
+pSlMinAtr        = useCustom ? slMinAtr        : useXauPreset ? 0.50    : useEurPreset ? 0.40   : 0.60
+pVolMultMin      = useCustom ? volMultMin      : useXauPreset ? 1.15    : useEurPreset ? 1.20   : 1.15
+
+// =============================================================================
+// CORE CALCULATIONS
+// =============================================================================
+atr14       = ta.atr(14)
+volAvg      = ta.sma(volume, 20)
+volMult     = volAvg > 0 ? volume / volAvg : 1.0
+bodyAbs     = math.abs(close - open)
+candleRange = high - low
+bodyPct     = candleRange > 0 ? bodyAbs / candleRange : 0.0
+swingH20    = ta.highest(high, 20)
+swingL20    = ta.lowest(low, 20)
+
+// =============================================================================
+// SESSION DETECTION
+// =============================================================================
+inAsia   = not na(time(timeframe.period, asiaSess))
+inLondon = not na(time(timeframe.period, londonSess))
+inNY     = not na(time(timeframe.period, nySess))
+inActive = inLondon or inNY
+
+asiaStarted   = inAsia   and not inAsia[1]
+asiaEnded     = not inAsia and inAsia[1]
+londonStarted = inLondon and not inLondon[1]
+nyStarted     = inNY and not inNY[1]
+
+sessionName = inAsia ? "Asia" : inLondon ? "London" : inNY ? "NY" : "Off"
+
+// =============================================================================
+// HTF BIAS
+// =============================================================================
+[bBull4h, bBear4h, c4h, cPrev4h, atr4h] = request.security(syminfo.tickerid, htfBiasTF,
+     [math.sum(close >= open ? volume : 0.0, htfLookback),
+      math.sum(close <  open ? volume : 0.0, htfLookback),
+      close, close[htfLookback], ta.atr(14)],
+     lookahead = barmerge.lookahead_off)
+
+[bBull1h, bBear1h, c1h, cPrev1h, atr1h] = request.security(syminfo.tickerid, htfConfTF,
+     [math.sum(close >= open ? volume : 0.0, htfLookback),
+      math.sum(close <  open ? volume : 0.0, htfLookback),
+      close, close[htfLookback], ta.atr(14)],
+     lookahead = barmerge.lookahead_off)
+
+htfScore(bull, bear, c, cp, atrH) =>
+    tot  = bull + bear
+    vImb = tot > 0 ? (bull - bear) / tot : 0.0
+    mRaw = atrH > 0 ? (c - cp) / (atrH * htfLookback * 0.5) : 0.0
+    mom  = math.max(-1.0, math.min(1.0, mRaw))
+    vImb * 0.6 + mom * 0.4
+
+score4h = htfScore(bBull4h, bBear4h, c4h, cPrev4h, atr4h)
+score1h = htfScore(bBull1h, bBear1h, c1h, cPrev1h, atr1h)
+
+htfBull4h = score4h >=  htfMinScore
+htfBear4h = score4h <= -htfMinScore
+htfBull1h = score1h >=  htfMinScore * 0.8
+htfBear1h = score1h <= -htfMinScore * 0.8
+
+htfLongOK  = requireBothHTF ? (htfBull4h and htfBull1h) : htfBull4h
+htfShortOK = requireBothHTF ? (htfBear4h and htfBear1h) : htfBear4h
+
+htfBiasLabel = score4h >= htfMinScore ? "BULL" : score4h <= -htfMinScore ? "BEAR" : "NEUTRAL"
+htfBiasColor = score4h >= htfMinScore ? bullColor : score4h <= -htfMinScore ? bearColor : color.gray
+
+// =============================================================================
+// SESSION BOXES + H/L TRACKING
+// =============================================================================
+var float asiaHigh   = na
+var float asiaLow    = na
+var box   asiaBox    = na
+var float londonHigh = na
+var float londonLow  = na
+var box   londonBox  = na
+var float nyHigh     = na
+var float nyLow      = na
+var box   nyBox      = na
+
+if asiaStarted
+    asiaHigh   := high
+    asiaLow    := low
+    londonHigh := na
+    londonLow  := na
+    if showAsiaBox
+        asiaBox := box.new(bar_index, high, bar_index, low, bgcolor = asiaColor, border_color = asiaColor)
+else if inAsia
+    asiaHigh := math.max(nz(asiaHigh, high), high)
+    asiaLow  := math.min(nz(asiaLow,  low),  low)
+    if showAsiaBox and not na(asiaBox)
+        box.set_top(asiaBox, asiaHigh)
+        box.set_bottom(asiaBox, asiaLow)
+        box.set_right(asiaBox, bar_index)
+
+if londonStarted
+    londonHigh := high
+    londonLow  := low
+    if showLondonBox
+        londonBox := box.new(bar_index, high, bar_index, low, bgcolor = londonColor, border_color = londonColor)
+else if inLondon
+    londonHigh := math.max(nz(londonHigh, high), high)
+    londonLow  := math.min(nz(londonLow,  low),  low)
+    if showLondonBox and not na(londonBox)
+        box.set_top(londonBox, londonHigh)
+        box.set_bottom(londonBox, londonLow)
+        box.set_right(londonBox, bar_index)
+
+if nyStarted
+    nyHigh := high
+    nyLow  := low
+    if showNYBox
+        nyBox := box.new(bar_index, high, bar_index, low, bgcolor = nyColor, border_color = nyColor)
+else if inNY
+    nyHigh := math.max(nz(nyHigh, high), high)
+    nyLow  := math.min(nz(nyLow,  low),  low)
+    if showNYBox and not na(nyBox)
+        box.set_top(nyBox, nyHigh)
+        box.set_bottom(nyBox, nyLow)
+        box.set_right(nyBox, bar_index)
+
+asiaRangeTicks = not na(asiaHigh) and not na(asiaLow) ? (asiaHigh - asiaLow) / syminfo.mintick : 0.0
+asiaBlocked    = asiaRangeTicks > pMaxAsiaRange
+
+// =============================================================================
+// PDH / PDL / PWH / PWL
+// =============================================================================
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+var line pdhLine = na
+var line pdlLine = na
+isNewDay = ta.change(time("D")) != 0
+if isNewDay
+    if not na(pdhLine)
+        line.delete(pdhLine)
+    if not na(pdlLine)
+        line.delete(pdlLine)
+    if showPDH
+        pdhLine := line.new(bar_index, pdh, bar_index + 200, pdh, color = pdhColor, width = 1)
+    if showPDL
+        pdlLine := line.new(bar_index, pdl, bar_index + 200, pdl, color = pdlColor, width = 1)
+else
+    if not na(pdhLine)
+        line.set_x2(pdhLine, bar_index + 50)
+    if not na(pdlLine)
+        line.set_x2(pdlLine, bar_index + 50)
+
+plot(showPWH ? pwh : na, "PWH", color = pwhColor, linewidth = 2, style = plot.style_circles)
+plot(showPWL ? pwl : na, "PWL", color = pwlColor, linewidth = 2, style = plot.style_circles)
+
+// =============================================================================
+// SWEEP DETECTION
+// =============================================================================
+var bool   asiaHighSwept   = false
+var bool   asiaLowSwept    = false
+var bool   londonHighSwept = false
+var bool   londonLowSwept  = false
+var float  lastSweptLevel  = na
+var string lastSweptSrc    = ""
+var bool   lastSweepLong   = false
+
+if asiaStarted
+    asiaHighSwept   := false
+    asiaLowSwept    := false
+    londonHighSwept := false
+    londonLowSwept  := false
+    lastSweptLevel  := na
+    lastSweptSrc    := ""
+
+if sweepAsia and not inAsia and not na(asiaHigh) and not na(asiaLow)
+    if high > asiaHigh
+        cleanSweep = requireClose ? close < asiaHigh : true
+        if cleanSweep and not asiaHighSwept
+            asiaHighSwept  := true
+            lastSweptLevel := asiaHigh
+            lastSweptSrc   := "AH"
+            lastSweepLong  := false
+            if showSweepLines
+                line.new(bar_index - 1, asiaHigh, bar_index + 80, asiaHigh, color = sweepAsiaColor, width = 2, style = line.style_dashed)
+    if low < asiaLow
+        cleanSweep = requireClose ? close > asiaLow : true
+        if cleanSweep and not asiaLowSwept
+            asiaLowSwept   := true
+            lastSweptLevel := asiaLow
+            lastSweptSrc   := "AL"
+            lastSweepLong  := true
+            if showSweepLines
+                line.new(bar_index - 1, asiaLow, bar_index + 80, asiaLow, color = sweepAsiaColor, width = 2, style = line.style_dashed)
+
+if sweepLondon and inNY and not na(londonHigh) and not na(londonLow)
+    if high > londonHigh
+        cleanSweep = requireClose ? close < londonHigh : true
+        if cleanSweep and not londonHighSwept
+            londonHighSwept := true
+            lastSweptLevel  := londonHigh
+            lastSweptSrc    := "LH"
+            lastSweepLong   := false
+            if showSweepLines
+                line.new(bar_index - 1, londonHigh, bar_index + 80, londonHigh, color = sweepLonColor, width = 2, style = line.style_dashed)
+    if low < londonLow
+        cleanSweep = requireClose ? close > londonLow : true
+        if cleanSweep and not londonLowSwept
+            londonLowSwept  := true
+            lastSweptLevel  := londonLow
+            lastSweptSrc    := "LL"
+            lastSweepLong   := true
+            if showSweepLines
+                line.new(bar_index - 1, londonLow, bar_index + 80, londonLow, color = sweepLonColor, width = 2, style = line.style_dashed)
+
+anySweep = asiaHighSwept or asiaLowSwept or londonHighSwept or londonLowSwept
+
+// =============================================================================
+// MSS — MARKET STRUCTURE SHIFT
+// =============================================================================
+prevSwingH = ta.highest(high[1], mssLookback)
+prevSwingL = ta.lowest(low[1],   mssLookback)
+
+var float chochLevelLong  = na
+var float chochLevelShort = na
+var bool  mssLongArmed    = false
+var bool  mssShortArmed   = false
+var bool  mssLongFired    = false
+var bool  mssShortFired   = false
+var int   mssFireBar      = na
+
+if asiaStarted
+    mssLongArmed    := false
+    mssShortArmed   := false
+    mssLongFired    := false
+    mssShortFired   := false
+    chochLevelLong  := na
+    chochLevelShort := na
+    mssFireBar      := na
+
+if (asiaLowSwept or londonLowSwept) and not mssLongArmed and not mssLongFired
+    chochLevelLong := prevSwingH
+    mssLongArmed   := true
+
+if (asiaHighSwept or londonHighSwept) and not mssShortArmed and not mssShortFired
+    chochLevelShort := prevSwingL
+    mssShortArmed   := true
+
+mssBodyOK = bodyPct >= pMssBodyPct
+
+if mssLongArmed and not mssLongFired and not na(chochLevelLong)
+    if close > chochLevelLong and mssBodyOK
+        mssLongFired  := true
+        mssShortArmed := false
+        mssFireBar    := bar_index
+        if showMssLines
+            line.new(bar_index - 1, chochLevelLong, bar_index + 40, chochLevelLong, color = mssColor, width = 1, style = line.style_dotted)
+
+if mssShortArmed and not mssShortFired and not na(chochLevelShort)
+    if close < chochLevelShort and mssBodyOK
+        mssShortFired := true
+        mssLongArmed  := false
+        mssFireBar    := bar_index
+        if showMssLines
+            line.new(bar_index - 1, chochLevelShort, bar_index + 40, chochLevelShort, color = mssColor, width = 1, style = line.style_dotted)
+
+// =============================================================================
+// FVG — FAIR VALUE GAPS
+// =============================================================================
+minFvgSize = pFvgMinTicks * syminfo.mintick
+
+bullFvgTop = low[1] > high[2] and (low[1] - high[2]) >= minFvgSize ? low[1]  : na
+bullFvgBot = low[1] > high[2] and (low[1] - high[2]) >= minFvgSize ? high[2] : na
+bearFvgTop = high[1] < low[2] and (low[2] - high[1]) >= minFvgSize ? low[2]  : na
+bearFvgBot = high[1] < low[2] and (low[2] - high[1]) >= minFvgSize ? high[1] : na
+
+var array<box>   bullFvgBoxes = array.new<box>()
+var array<float> bullFvgTops  = array.new<float>()
+var array<float> bullFvgBots  = array.new<float>()
+var array<box>   bearFvgBoxes = array.new<box>()
+var array<float> bearFvgTops  = array.new<float>()
+var array<float> bearFvgBots  = array.new<float>()
+
+if not na(bullFvgTop) and showFvg
+    if array.size(bullFvgBoxes) >= maxFvgs
+        bx = array.shift(bullFvgBoxes)
+        if not na(bx)
+            box.delete(bx)
+        array.shift(bullFvgTops)
+        array.shift(bullFvgBots)
+    bx = box.new(bar_index - 2, bullFvgTop, bar_index + 50, bullFvgBot, bgcolor = bullFvgColor, border_color = color.new(bullColor, 60))
+    array.push(bullFvgBoxes, bx)
+    array.push(bullFvgTops,  bullFvgTop)
+    array.push(bullFvgBots,  bullFvgBot)
+
+if not na(bearFvgTop) and showFvg
+    if array.size(bearFvgBoxes) >= maxFvgs
+        bx = array.shift(bearFvgBoxes)
+        if not na(bx)
+            box.delete(bx)
+        array.shift(bearFvgTops)
+        array.shift(bearFvgBots)
+    bx = box.new(bar_index - 2, bearFvgTop, bar_index + 50, bearFvgBot, bgcolor = bearFvgColor, border_color = color.new(bearColor, 60))
+    array.push(bearFvgBoxes, bx)
+    array.push(bearFvgTops,  bearFvgTop)
+    array.push(bearFvgBots,  bearFvgBot)
+
+if array.size(bullFvgBoxes) > 0
+    for i = array.size(bullFvgBoxes) - 1 to 0
+        bx = array.get(bullFvgBoxes, i)
+        bb = array.get(bullFvgBots,  i)
+        if not na(bx)
+            box.set_right(bx, bar_index + 30)
+            if fvgDeleteFilled and close < bb
+                box.delete(bx)
+                array.remove(bullFvgBoxes, i)
+                array.remove(bullFvgTops,  i)
+                array.remove(bullFvgBots,  i)
+
+if array.size(bearFvgBoxes) > 0
+    for i = array.size(bearFvgBoxes) - 1 to 0
+        bx = array.get(bearFvgBoxes, i)
+        bt = array.get(bearFvgTops,  i)
+        if not na(bx)
+            box.set_right(bx, bar_index + 30)
+            if fvgDeleteFilled and close > bt
+                box.delete(bx)
+                array.remove(bearFvgBoxes, i)
+                array.remove(bearFvgTops,  i)
+                array.remove(bearFvgBots,  i)
+
+inBullFvg = false
+inBearFvg = false
+if array.size(bullFvgBots) > 0
+    for i = 0 to array.size(bullFvgBots) - 1
+        if low <= array.get(bullFvgTops, i) and low >= array.get(bullFvgBots, i)
+            inBullFvg := true
+if array.size(bearFvgTops) > 0
+    for i = 0 to array.size(bearFvgTops) - 1
+        if high >= array.get(bearFvgBots, i) and high <= array.get(bearFvgTops, i)
+            inBearFvg := true
+
+// =============================================================================
+// ORDER BLOCKS
+// =============================================================================
+var array<box>   bullObBoxes = array.new<box>()
+var array<float> bullObTops  = array.new<float>()
+var array<float> bullObBots  = array.new<float>()
+var array<box>   bearObBoxes = array.new<box>()
+var array<float> bearObTops  = array.new<float>()
+var array<float> bearObBots  = array.new<float>()
+
+bullDisplace = close > close[3] and (close - close[3]) > atr14 * pObMinAtr
+bearDisplace = close < close[3] and (close[3] - close) > atr14 * pObMinAtr
+
+if bullDisplace
+    obTop = math.max(open[3], close[3])
+    obBot = math.min(open[3], close[3])
+    if close[3] < open[3] and showOb
+        if array.size(bullObBoxes) >= maxObs
+            bx = array.shift(bullObBoxes)
+            if not na(bx)
+                box.delete(bx)
+            array.shift(bullObTops)
+            array.shift(bullObBots)
+        bx = box.new(bar_index - 3, obTop, bar_index + 60, obBot, bgcolor = bullObColor, border_color = color.new(bullColor, 50))
+        array.push(bullObBoxes, bx)
+        array.push(bullObTops,  obTop)
+        array.push(bullObBots,  obBot)
+
+if bearDisplace
+    obTop = math.max(open[3], close[3])
+    obBot = math.min(open[3], close[3])
+    if close[3] > open[3] and showOb
+        if array.size(bearObBoxes) >= maxObs
+            bx = array.shift(bearObBoxes)
+            if not na(bx)
+                box.delete(bx)
+            array.shift(bearObTops)
+            array.shift(bearObBots)
+        bx = box.new(bar_index - 3, obTop, bar_index + 60, obBot, bgcolor = bearObColor, border_color = color.new(bearColor, 50))
+        array.push(bearObBoxes, bx)
+        array.push(bearObTops,  obTop)
+        array.push(bearObBots,  obBot)
+
+if array.size(bullObBoxes) > 0
+    for i = 0 to array.size(bullObBoxes) - 1
+        bx = array.get(bullObBoxes, i)
+        if not na(bx)
+            box.set_right(bx, bar_index + 30)
+
+if array.size(bearObBoxes) > 0
+    for i = 0 to array.size(bearObBoxes) - 1
+        bx = array.get(bearObBoxes, i)
+        if not na(bx)
+            box.set_right(bx, bar_index + 30)
+
+inBullOb = false
+inBearOb = false
+if array.size(bullObBots) > 0
+    for i = 0 to array.size(bullObBots) - 1
+        if low <= array.get(bullObTops, i) and low >= array.get(bullObBots, i)
+            inBullOb := true
+if array.size(bearObTops) > 0
+    for i = 0 to array.size(bearObTops) - 1
+        if high >= array.get(bearObBots, i) and high <= array.get(bearObTops, i)
+            inBearOb := true
+
+pdArrayLong  = inBullFvg or inBullOb
+pdArrayShort = inBearFvg or inBearOb
+
+// =============================================================================
+// CRT ENGINE — CANDLE RANGE THEORY
+// =============================================================================
+// C1 = range candle | C2 = sweep candle (wick beyond C1) | C3 = delivery candle
+c1H   = high[2]
+c1L   = low[2]
+c1Mid = (c1H + c1L) / 2
+c2H   = high[1]
+c2L   = low[1]
+
+wickThresh = atr14 * pCrtSweepWickAtr
+
+crtLongC2Sweep  = c2L < (c1L - wickThresh)
+crtLongC3Del    = close > open and bodyPct >= pCrtBodyPct and close > c1Mid
+crtShortC2Sweep = c2H > (c1H + wickThresh)
+crtShortC3Del   = close < open and bodyPct >= pCrtBodyPct and close < c1Mid
+
+crtLong  = enableCrt and crtLongC2Sweep  and crtLongC3Del
+crtShort = enableCrt and crtShortC2Sweep and crtShortC3Del
+
+slBuf      = pSlBufferTicks * syminfo.mintick
+crtSlLong  = math.min(c2L - slBuf, close - atr14 * pSlMinAtr)
+crtSlShort = math.max(c2H + slBuf, close + atr14 * pSlMinAtr)
+
+// =============================================================================
+// TP LEVEL FINDER (returns [price, source])
+// =============================================================================
+findTpLong(entryPrice, slPrice) =>
+    riskDist = entryPrice - slPrice
+    bestTp   = float(na)
+    bestSrc  = ""
+    if not na(asiaHigh) and asiaHigh > entryPrice
+        bestTp  := asiaHigh - tpBufferTicks * syminfo.mintick
+        bestSrc := "Asia H"
+    if not na(londonHigh) and londonHigh > entryPrice
+        tpCand = londonHigh - tpBufferTicks * syminfo.mintick
+        if na(bestTp) or (tpCand > entryPrice and tpCand < bestTp)
+            bestTp  := tpCand
+            bestSrc := "London H"
+    if not na(pdh) and pdh > entryPrice
+        tpCand = pdh - tpBufferTicks * syminfo.mintick
+        if na(bestTp) or (tpCand > entryPrice and tpCand < bestTp)
+            bestTp  := tpCand
+            bestSrc := "PDH"
+    if swingH20 > entryPrice
+        tpCand = swingH20 - tpBufferTicks * syminfo.mintick
+        if na(bestTp) or (tpCand > entryPrice and tpCand < bestTp)
+            bestTp  := tpCand
+            bestSrc := "Swing H"
+    if not na(bestTp) and riskDist > 0
+        rrCalc = (bestTp - entryPrice) / riskDist
+        if rrCalc < minRR
+            bestTp  := entryPrice + riskDist * minRR
+            bestSrc := str.tostring(minRR, "#.#") + "R min"
+    else
+        if riskDist > 0
+            bestTp  := entryPrice + riskDist * minRR
+            bestSrc := str.tostring(minRR, "#.#") + "R min"
+    if riskDist > 0 and not na(bestTp) and (bestTp - entryPrice) / riskDist > maxRR
+        bestTp  := entryPrice + riskDist * maxRR
+        bestSrc := str.tostring(maxRR, "#.#") + "R cap"
+    [bestTp, bestSrc]
+
+findTpShort(entryPrice, slPrice) =>
+    riskDist = slPrice - entryPrice
+    bestTp   = float(na)
+    bestSrc  = ""
+    if not na(asiaLow) and asiaLow < entryPrice
+        bestTp  := asiaLow + tpBufferTicks * syminfo.mintick
+        bestSrc := "Asia L"
+    if not na(londonLow) and londonLow < entryPrice
+        tpCand = londonLow + tpBufferTicks * syminfo.mintick
+        if na(bestTp) or (tpCand < entryPrice and tpCand > bestTp)
+            bestTp  := tpCand
+            bestSrc := "London L"
+    if not na(pdl) and pdl < entryPrice
+        tpCand = pdl + tpBufferTicks * syminfo.mintick
+        if na(bestTp) or (tpCand < entryPrice and tpCand > bestTp)
+            bestTp  := tpCand
+            bestSrc := "PDL"
+    if swingL20 < entryPrice
+        tpCand = swingL20 + tpBufferTicks * syminfo.mintick
+        if na(bestTp) or (tpCand < entryPrice and tpCand > bestTp)
+            bestTp  := tpCand
+            bestSrc := "Swing L"
+    if not na(bestTp) and riskDist > 0
+        rrCalc = (entryPrice - bestTp) / riskDist
+        if rrCalc < minRR
+            bestTp  := entryPrice - riskDist * minRR
+            bestSrc := str.tostring(minRR, "#.#") + "R min"
+    else
+        if riskDist > 0
+            bestTp  := entryPrice - riskDist * minRR
+            bestSrc := str.tostring(minRR, "#.#") + "R min"
+    if riskDist > 0 and not na(bestTp) and (entryPrice - bestTp) / riskDist > maxRR
+        bestTp  := entryPrice - riskDist * maxRR
+        bestSrc := str.tostring(maxRR, "#.#") + "R cap"
+    [bestTp, bestSrc]
+
+// =============================================================================
+// SIGNAL GENERATION
+// =============================================================================
+var int dailySignalCount  = 0
+var int londonSignalCount = 0
+var int nySignalCount     = 0
+
+if asiaStarted
+    dailySignalCount  := 0
+    londonSignalCount := 0
+    nySignalCount     := 0
+if londonStarted
+    londonSignalCount := 0
+if nyStarted
+    nySignalCount := 0
+
+volOk         = not enableVolConf or (volMult >= pVolMultMin)
+sigCountOk    = dailySignalCount < maxSignals
+londonCountOk = not inLondon or (londonSignalCount < maxLondon)
+nyCountOk     = not inNY     or (nySignalCount < maxNY)
+anyCountOk    = sigCountOk and londonCountOk and nyCountOk
+
+scoreSignal(htf, kz, sweep, mss, crt) =>
+    s = 0
+    if htf
+        s += 1
+    if kz
+        s += 1
+    if sweep
+        s += 1
+    if mss
+        s += 1
+    if crt
+        s += 1
+    s
+
+qualScoreLong  = scoreSignal(htfLongOK,  inActive, anySweep and lastSweepLong,     mssLongFired,  crtLong  and pdArrayLong)
+qualScoreShort = scoreSignal(htfShortOK, inActive, anySweep and not lastSweepLong, mssShortFired, crtShort and pdArrayShort)
+
+gradeStr(s) => s >= 5 ? "A+" : s == 4 ? "B+" : s == 3 ? "B" : "C"
+
+entryL = close
+slL    = crtSlLong
+[tpL, tpSrcL] = findTpLong(entryL, slL)
+rrL    = slL < entryL and (entryL - slL) > 0 ? (tpL - entryL) / (entryL - slL) : 0.0
+
+entryS = close
+slS    = crtSlShort
+[tpS, tpSrcS] = findTpShort(entryS, slS)
+rrS    = slS > entryS and (slS - entryS) > 0 ? (entryS - tpS) / (slS - entryS) : 0.0
+
+rrOkL = rrL >= minRR and rrL <= maxRR
+rrOkS = rrS >= minRR and rrS <= maxRR
+
+fireLong  = crtLong  and qualScoreLong  >= minQualScore and volOk and anyCountOk and not asiaBlocked and rrOkL
+fireShort = crtShort and qualScoreShort >= minQualScore and volOk and anyCountOk and not asiaBlocked and rrOkS
+
+// =============================================================================
+// SIGNAL EXECUTION + VISUALS (v9.22-style trade display)
+// =============================================================================
+if fireLong
+    dailySignalCount += 1
+    if inLondon
+        londonSignalCount += 1
+    if inNY
+        nySignalCount += 1
+    grade = gradeStr(qualScoreLong)
+    rrTxt = str.tostring(math.round(rrL, 2))
+    slSrcTxt = slShowSrcInLabel ? " (CRT C2)" : ""
+    tpSrcTxt = tpSrcL != "" ? " @" + tpSrcL : ""
+    qualBadge = showQuality ? "\n[" + grade + " " + str.tostring(qualScoreLong) + "/5]" : ""
+    asiaWarnBadge = asiaBlocked ? "\n⚠ ASIA WIDE" : ""
+    if showLabels
+        label.new(bar_index, low, "▲ CRT LONG " + profileLabelTag + "\n" + lastSweptSrc + " Swept\nSL: " + str.tostring(slL, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpL, format.mintick) + tpSrcTxt + "\n" + rrTxt + "R" + qualBadge + asiaWarnBadge, style = label.style_label_up, color = color.new(bullColor, 50), textcolor = color.white, size = size.tiny)
+    if showRrBox
+        box.new(bar_index, close, bar_index + 25, tpL, bgcolor = color.new(bullColor, 85), border_color = color.new(bullColor, 40))
+        box.new(bar_index, slL, bar_index + 25, close, bgcolor = color.new(bearColor, 85), border_color = color.new(bearColor, 40))
+    if enableAlerts
+        alert('{"secret":"' + WEBHOOK_SECRET + '","version":"APEX1.1","symbol":"' + syminfo.ticker + '","side":"LONG","trade":"CRT LONG (' + lastSweptSrc + ')","session":"' + sessionName + '","profile":"' + profileDisplayTag + '","entry":' + str.tostring(math.round(entryL, 5)) + ',"sl":' + str.tostring(math.round(slL, 5)) + ',"tp":' + str.tostring(math.round(tpL, 5)) + ',"rr":' + str.tostring(math.round(rrL, 2)) + ',"swept":"' + lastSweptSrc + '","engulf_body_pct":' + str.tostring(math.round(bodyPct, 2)) + ',"vol_spike":' + str.tostring(math.round(volMult, 2)) + ',"htf_aligned":' + str.tostring(htfLongOK) + ',"quality_score":' + str.tostring(qualScoreLong * 20) + ',"quality_grade":"' + grade + '"}', alert.freq_once_per_bar)
+
+if fireShort
+    dailySignalCount += 1
+    if inLondon
+        londonSignalCount += 1
+    if inNY
+        nySignalCount += 1
+    grade = gradeStr(qualScoreShort)
+    rrTxt = str.tostring(math.round(rrS, 2))
+    slSrcTxt = slShowSrcInLabel ? " (CRT C2)" : ""
+    tpSrcTxt = tpSrcS != "" ? " @" + tpSrcS : ""
+    qualBadge = showQuality ? "\n[" + grade + " " + str.tostring(qualScoreShort) + "/5]" : ""
+    asiaWarnBadge = asiaBlocked ? "\n⚠ ASIA WIDE" : ""
+    if showLabels
+        label.new(bar_index, high, "▼ CRT SHORT " + profileLabelTag + "\n" + lastSweptSrc + " Swept\nSL: " + str.tostring(slS, format.mintick) + slSrcTxt + "\nTP: " + str.tostring(tpS, format.mintick) + tpSrcTxt + "\n" + rrTxt + "R" + qualBadge + asiaWarnBadge, style = label.style_label_down, color = color.new(bearColor, 50), textcolor = color.white, size = size.tiny)
+    if showRrBox
+        box.new(bar_index, tpS, bar_index + 25, close, bgcolor = color.new(bullColor, 85), border_color = color.new(bullColor, 40))
+        box.new(bar_index, close, bar_index + 25, slS, bgcolor = color.new(bearColor, 85), border_color = color.new(bearColor, 40))
+    if enableAlerts
+        alert('{"secret":"' + WEBHOOK_SECRET + '","version":"APEX1.1","symbol":"' + syminfo.ticker + '","side":"SHORT","trade":"CRT SHORT (' + lastSweptSrc + ')","session":"' + sessionName + '","profile":"' + profileDisplayTag + '","entry":' + str.tostring(math.round(entryS, 5)) + ',"sl":' + str.tostring(math.round(slS, 5)) + ',"tp":' + str.tostring(math.round(tpS, 5)) + ',"rr":' + str.tostring(math.round(rrS, 2)) + ',"swept":"' + lastSweptSrc + '","engulf_body_pct":' + str.tostring(math.round(bodyPct, 2)) + ',"vol_spike":' + str.tostring(math.round(volMult, 2)) + ',"htf_aligned":' + str.tostring(htfShortOK) + ',"quality_score":' + str.tostring(qualScoreShort * 20) + ',"quality_grade":"' + grade + '"}', alert.freq_once_per_bar)
+
+// =============================================================================
+// PO3 PHASE TRACKER
+// =============================================================================
+po3Phase = inAsia ? "ACC" : anySweep and not (mssLongFired or mssShortFired) ? "MAN" : mssLongFired or mssShortFired ? "DIST" : "—"
+po3Color  = po3Phase == "ACC" ? color.new(#8e44ad, 0) : po3Phase == "MAN" ? color.new(#e67e22, 0) : po3Phase == "DIST" ? color.new(#27ae60, 0) : color.gray
+
+// =============================================================================
+// DASHBOARD
+// =============================================================================
+if showDash and barstate.islast
+    var table dash = table.new(position.top_right, 2, 16,
+         bgcolor = color.new(#1a1a2e, 8), border_color = color.new(color.white, 70), border_width = 1,
+         frame_color = color.new(color.white, 60), frame_width = 1)
+    hdr = color.new(#16213e, 0)
+    val = color.new(#0f3460, 40)
+
+    table.cell(dash, 0, 0, "APEX v1.1", text_color = color.white, bgcolor = hdr, text_size = size.small)
+    table.cell(dash, 1, 0, profileDisplayTag + " " + profileSourceTag, text_color = color.new(#f39c12, 0), bgcolor = hdr, text_size = size.small)
+    table.cell(dash, 0, 1, "Symbol", text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 1, syminfo.ticker, text_color = color.white, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 0, 2, "4H Bias",    text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 2, htfBiasLabel + " (" + str.tostring(math.round(score4h, 2)) + ")", text_color = htfBiasColor, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 0, 3, "Session",    text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    sessColor = inLondon ? color.new(#2980b9, 0) : inNY ? color.new(#95a5a6, 0) : inAsia ? color.new(#8e44ad, 0) : color.gray
+    table.cell(dash, 1, 3, sessionName, text_color = sessColor, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 0, 4, "PO3 Phase",  text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 4, po3Phase,     text_color = po3Color,     bgcolor = val, text_size = size.tiny)
+    sweepTxt = anySweep ? (lastSweptSrc + " swept") : "None"
+    sweepC   = anySweep ? color.new(#27ae60, 0) : color.gray
+    table.cell(dash, 0, 5, "Sweep",   text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 5, sweepTxt, text_color = sweepC,        bgcolor = val, text_size = size.tiny)
+    mssTxt = mssLongFired ? "LONG fired" : mssShortFired ? "SHORT fired" : (mssLongArmed or mssShortArmed) ? "Armed" : "—"
+    mssC   = mssLongFired ? bullColor : mssShortFired ? bearColor : (mssLongArmed or mssShortArmed) ? color.new(#f39c12, 0) : color.gray
+    table.cell(dash, 0, 6, "MSS",   text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 6, mssTxt, text_color = mssC,          bgcolor = val, text_size = size.tiny)
+    crtTxt = crtLong ? "LONG CRT" : crtShort ? "SHORT CRT" : "—"
+    crtC   = crtLong ? bullColor  : crtShort  ? bearColor  : color.gray
+    table.cell(dash, 0, 7, "CRT Signal", text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 7, crtTxt,       text_color = crtC,         bgcolor = val, text_size = size.tiny)
+    pdTxt = pdArrayLong ? "Bull FVG/OB" : pdArrayShort ? "Bear FVG/OB" : "—"
+    pdC   = pdArrayLong ? bullColor     : pdArrayShort  ? bearColor    : color.gray
+    table.cell(dash, 0, 8, "PD Array", text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 8, pdTxt,      text_color = pdC,          bgcolor = val, text_size = size.tiny)
+    volTxt = str.tostring(math.round(volMult, 2)) + "x " + (volMult >= pVolMultMin ? "OK" : "LOW")
+    volC   = volMult >= pVolMultMin ? color.new(#27ae60, 0) : color.gray
+    table.cell(dash, 0, 9, "Volume", text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 9, volTxt,   text_color = volC,         bgcolor = val, text_size = size.tiny)
+    asiaRng = not na(asiaHigh) and not na(asiaLow) ? str.tostring(math.round(asiaRangeTicks, 0)) + " tks" : "—"
+    asiaC   = asiaBlocked ? bearColor : color.new(#27ae60, 0)
+    table.cell(dash, 0, 10, "Asia Range", text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 10, asiaRng + (asiaBlocked ? " BLOCKED" : " OK"), text_color = asiaC, bgcolor = val, text_size = size.tiny)
+    activeScore = crtLong ? qualScoreLong : crtShort ? qualScoreShort : 0
+    qColor      = activeScore >= 5 ? bullColor : activeScore >= 3 ? color.new(#f39c12, 0) : color.gray
+    table.cell(dash, 0, 11, "Quality", text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 11, gradeStr(activeScore) + " " + str.tostring(activeScore) + "/5", text_color = qColor, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 0, 12, "Signals Today", text_color = color.silver, bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 12, str.tostring(dailySignalCount) + "/" + str.tostring(maxSignals),
+         text_color = dailySignalCount >= maxSignals ? bearColor : color.new(#27ae60, 0), bgcolor = val, text_size = size.tiny)
+    readyLong  = htfLongOK  and inActive and anySweep and lastSweepLong     and mssLongFired
+    readyShort = htfShortOK and inActive and anySweep and not lastSweepLong and mssShortFired
+    readyTxt   = readyLong ? "LONG READY — wait CRT" : readyShort ? "SHORT READY — wait CRT" : "Waiting..."
+    readyC     = readyLong ? bullColor : readyShort ? bearColor : color.gray
+    table.cell(dash, 0, 13, "Status",  text_color = color.silver, bgcolor = hdr, text_size = size.tiny)
+    table.cell(dash, 1, 13, readyTxt, text_color = readyC,        bgcolor = hdr, text_size = size.tiny)
+    aHL = not na(asiaHigh) ? "H:" + str.tostring(math.round(asiaHigh, 2)) + " L:" + str.tostring(math.round(asiaLow, 2)) : "—"
+    table.cell(dash, 0, 14, "Asia H/L", text_color = color.silver,          bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 14, aHL,        text_color = color.new(#8e44ad, 0), bgcolor = val, text_size = size.tiny)
+    // Profile config row
+    pConfTxt = "FVG:" + str.tostring(pFvgMinTicks) + " OB:" + str.tostring(pObMinAtr, "#.##") + "x CRT:" + str.tostring(math.round(pCrtBodyPct * 100, 0)) + "% SL:" + str.tostring(pSlBufferTicks, "#") + "tk"
+    table.cell(dash, 0, 15, "Profile Cfg", text_color = color.silver,          bgcolor = val, text_size = size.tiny)
+    table.cell(dash, 1, 15, pConfTxt,      text_color = color.new(#95a5a6, 0), bgcolor = val, text_size = size.tiny)
+
+// =============================================================================
+// ASIA H/L EXTENSION LINES
+// =============================================================================
+var line asiaHLine = na
+var line asiaLLine = na
+if asiaEnded and not na(asiaHigh)
+    asiaHLine := line.new(bar_index, asiaHigh, bar_index + 200, asiaHigh, color = color.new(#e74c3c, 20), width = 1, style = line.style_dotted)
+    asiaLLine := line.new(bar_index, asiaLow,  bar_index + 200, asiaLow,  color = color.new(#3498db, 20), width = 1, style = line.style_dotted)
+if not na(asiaHLine)
+    line.set_x2(asiaHLine, bar_index + 50)
+if not na(asiaLLine)
+    line.set_x2(asiaLLine, bar_index + 50)

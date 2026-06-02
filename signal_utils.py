@@ -75,6 +75,29 @@ def evaluate_signal(signal_data: dict) -> dict:
     """
     reasons = []
 
+    # ── v9.25: signal_grade from 223-chart edge filters ─────────────────────
+    sig_grade = signal_data.get("signal_grade")
+    if sig_grade in ("A+", "A", "B", "C"):
+        grade_map = {"A+": 9.5, "A": 7.5, "B": 5.5, "C": 3.0}
+        score = grade_map.get(sig_grade, 5.0)
+        # 4-tier aware: preserve the exact Pine grade (A+/A/B/C) — no collapsing A→B
+        rating = sig_grade
+        reasons.append(f"v9.25 edge grade: {sig_grade}")
+        if signal_data.get("fvg_nearby"):
+            reasons.append("✦ FVG nearby")
+        if signal_data.get("htf_aligned"):
+            reasons.append("✓ HTF aligned")
+        if signal_data.get("consolidation"):
+            reasons.append("⚠ consolidation")
+        explanation = f"v9.25 signal grade: {sig_grade}. " + " | ".join(reasons)
+        return {
+            "score": score,
+            "rating": rating,
+            "explanation": explanation,
+            "reasons": reasons,
+            "pine_scored": True,
+        }
+
     # ── v9.22: Pine authoritative score ──────────────────────────────────────
     raw_pine_score = signal_data.get("quality_score")
     raw_pine_grade = signal_data.get("quality_grade")
@@ -89,11 +112,12 @@ def evaluate_signal(signal_data: dict) -> dict:
             score = round(pine_score_100 / 10.0, 1)   # 0-100 → 0-10
             score = max(0.0, min(score, 10.0))
 
-            # Use Pine's grade if present; otherwise derive from normalised score
-            if raw_pine_grade in ("A+", "B", "C"):
+            # Use Pine's grade if present (4-tier A+/A/B/C); else derive from score
+            if raw_pine_grade in ("A+", "A", "B", "C"):
                 rating = raw_pine_grade
             else:
-                rating = "A+" if score >= 7.5 else ("B" if score >= 5.0 else "C")
+                rating = ("A+" if score >= 8.5 else "A" if score >= 7.0
+                          else "B" if score >= 5.0 else "C")
 
             reasons.append(f"Pine quality score: {pine_score_100}/100")
 
@@ -225,8 +249,11 @@ def evaluate_signal(signal_data: dict) -> dict:
     # --- CAP and grade ---
     score = max(0.0, min(score, 10.0))
 
-    if score >= 7.5:
+    # 4-tier grade (A+/A/B/C) to match the indicator
+    if score >= 8.5:
         rating = "A+"
+    elif score >= 7.0:
+        rating = "A"
     elif score >= 5:
         rating = "B"
     else:

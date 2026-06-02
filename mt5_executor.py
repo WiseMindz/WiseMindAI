@@ -7,6 +7,7 @@ Flow:
 """
 
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -16,8 +17,8 @@ _api        = None
 _connection = None
 _connected  = False
 
-# Grade priority for min-grade filter
-GRADE_ORDER = {"A+": 3, "B": 2, "C": 1}
+# Grade priority for min-grade filter — 4-tier, synced with the indicator (A+ > A > B > C)
+GRADE_ORDER = {"A+": 4, "A": 3, "B": 2, "C": 1}
 
 
 # ── Connection lifecycle ──────────────────────────────────────────────────────
@@ -115,7 +116,9 @@ async def execute_trade(
     if lot <= 0:
         return {"success": False, "error": f"Invalid lot: {lot}"}
 
-    options = {"comment": comment, "clientId": "wisemind"}
+    # MetaAPI rejects '+' and most symbols in comment — keep only safe chars, max 25
+    safe_comment = re.sub(r"[^A-Za-z0-9 _]", "", comment)[:25] or "WiseMind"
+    options = {"comment": safe_comment}
 
     try:
         if side.upper() == "LONG":
@@ -134,3 +137,189 @@ async def execute_trade(
         err = str(e)[:150]
         logger.error(f"❌ MT5 execution error: {type(e).__name__}: {err}")
         return {"success": False, "error": err}
+
+
+# ── Position monitor: breakeven + time-expiry ─────────────────────────────────
+# Replicates the Pine trade-management settings on the REAL broker:
+#   • "Auto Move SL to Breakeven" (beThresholdR) → move SL to entry at trigger_r.
+#   • "Auto-close after N hours"   (tradeExpiryHours) → force-close stale positions.
+# Per-position settings can be sent by Pine in the webhook (be_trigger_r / expiry_hours);
+# if not sent, the global .env defaults are used (so nothing breaks today).
+
+import asyncio
+import datetime
+
+# Minimal pip-size map for the optional BE buffer (price distance per pip)
+_PIP_SIZE = {
+    "EURUSD": 0.0001, "GBPUSD": 0.0001, "AUDUSD": 0.0001, "NZDUSD": 0.0001,
+    "USDCHF": 0.0001, "USDJPY": 0.01,   "USDCAD": 0.0001, "CHFJPY": 0.01,
+    "XAUUSD": 0.10,   "XAGUSD": 0.001,
+}
+
+_be_done: set = set()        # positions already moved to BE this run
+_pos_settings: dict = {}     # order_id -> {"be_trigger_r","be_buffer_pips","expiry_hours"} (from webhook)
+_monitor_task = None
+
+
+def _pip_size(symbol: str) -> float:
+    clean = symbol.upper().replace(".", "").replace("_", "")[:6]
+    return _PIP_SIZE.get(clean, 0.0001)
+
+
+def register_position_settings(order_id: str, be_trigger_r=None, be_buffer_pips=None, expiry_hours=None):
+    """Record per-position management settings (from the Pine webhook) for the monitor to use.
+    Any value left None falls back to the global .env default at check time."""
+    if not order_id:
+        return
+    _pos_settings[str(order_id)] = {
+        "be_trigger_r":   be_trigger_r,
+        "be_buffer_pips": be_buffer_pips,
+        "expiry_hours":   expiry_hours,
+    }
+
+
+def _setting(pid: str, key: str, default):
+    s = _pos_settings.get(str(pid))
+    if s and s.get(key) is not None:
+        return s[key]
+    return default
+
+
+async def _check_breakeven_once(default_trigger_r: float, default_buffer_pips: float) -> None:
+    """One pass: move SL→breakeven for any position that reached its trigger_r."""
+    global _connection, _be_done
+    if not _connected or _connection is None:
+        return
+
+    positions = await _connection.get_positions()
+    live_ids = set()
+
+    for pos in positions:
+        pid = str(pos.get("id"))
+        live_ids.add(pid)
+        if pid in _be_done:
+            continue
+
+        entry  = pos.get("openPrice")
+        sl     = pos.get("stopLoss")
+        tp     = pos.get("takeProfit")
+        ptype  = pos.get("type", "")        # POSITION_TYPE_BUY / POSITION_TYPE_SELL
+        symbol = pos.get("symbol", "")
+
+        if not entry or not sl:
+            continue
+        risk = abs(entry - sl)
+        if risk < 1e-9:                      # SL already ≈ entry → already BE
+            _be_done.add(pid)
+            continue
+
+        try:
+            price = await _connection.get_symbol_price(symbol)
+        except Exception:
+            continue
+
+        is_buy = "BUY" in ptype.upper()
+        cur_price = price.get("bid") if is_buy else price.get("ask")
+        if cur_price is None:
+            continue
+        profit_dist = (cur_price - entry) if is_buy else (entry - cur_price)
+
+        trigger_r   = _setting(pid, "be_trigger_r",   default_trigger_r)
+        buffer_pips = _setting(pid, "be_buffer_pips", default_buffer_pips)
+
+        if (profit_dist / risk) < trigger_r:
+            continue
+
+        buf = buffer_pips * _pip_size(symbol)
+        new_sl = round(entry + buf, 5) if is_buy else round(entry - buf, 5)
+        try:
+            await _connection.modify_position(pid, stop_loss=new_sl, take_profit=tp)
+            _be_done.add(pid)
+            logger.info(
+                f"🔒 BE moved: #{pid} {symbol} {'BUY' if is_buy else 'SELL'} "
+                f"@ {profit_dist/risk:.2f}R → SL {new_sl} (was {sl})"
+            )
+        except Exception as e:
+            logger.error(f"❌ BE modify failed #{pid}: {type(e).__name__}: {str(e)[:120]}")
+
+    # Prune state for closed positions
+    _be_done = _be_done & live_ids
+    for gone in [k for k in _pos_settings if k not in live_ids]:
+        _pos_settings.pop(gone, None)
+
+
+async def _check_expiry_once(default_expiry_hours: float) -> None:
+    """One pass: force-close any position older than its expiry_hours (mirrors Pine tradeExpiryHours)."""
+    global _connection
+    if not _connected or _connection is None:
+        return
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    positions = await _connection.get_positions()
+
+    for pos in positions:
+        pid = str(pos.get("id"))
+        expiry_hours = _setting(pid, "expiry_hours", default_expiry_hours)
+        if not expiry_hours or expiry_hours <= 0:     # 0 / None = expiry disabled
+            continue
+
+        opened = pos.get("time")
+        if isinstance(opened, str):
+            try:
+                opened = datetime.datetime.fromisoformat(opened.replace("Z", "+00:00"))
+            except Exception:
+                continue
+        if not isinstance(opened, datetime.datetime):
+            continue
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=datetime.timezone.utc)
+
+        age_hours = (now - opened).total_seconds() / 3600.0
+        if age_hours < expiry_hours:
+            continue
+
+        try:
+            await _connection.close_position(pid)
+            logger.info(
+                f"⏱ EXPIRY close: #{pid} {pos.get('symbol','')} open {age_hours:.1f}h "
+                f"≥ {expiry_hours}h → force-closed at market"
+            )
+        except Exception as e:
+            logger.error(f"❌ Expiry close failed #{pid}: {type(e).__name__}: {str(e)[:120]}")
+
+
+async def run_position_monitor(be_trigger_r: float, be_buffer_pips: float,
+                               expiry_hours: float, poll_seconds: int) -> None:
+    """Background loop: every poll_seconds, run breakeven + expiry management on open positions."""
+    logger.info(
+        f"🔒 Position monitor started — BE trigger {be_trigger_r}R / buffer {be_buffer_pips} pips, "
+        f"expiry {expiry_hours}h (0=off), poll {poll_seconds}s"
+    )
+    while True:
+        try:
+            await _check_breakeven_once(be_trigger_r, be_buffer_pips)
+            await _check_expiry_once(expiry_hours)
+        except asyncio.CancelledError:
+            logger.info("🔒 Position monitor stopped")
+            raise
+        except Exception as e:
+            logger.error(f"Position monitor loop error: {type(e).__name__}: {str(e)[:120]}")
+        await asyncio.sleep(poll_seconds)
+
+
+def start_position_monitor(be_trigger_r: float, be_buffer_pips: float,
+                           expiry_hours: float, poll_seconds: int):
+    """Create and track the position-monitor background task. Returns the task."""
+    global _monitor_task
+    _monitor_task = asyncio.create_task(
+        run_position_monitor(be_trigger_r, be_buffer_pips, expiry_hours, poll_seconds)
+    )
+    return _monitor_task
+
+
+def stop_position_monitor():
+    """Cancel the position-monitor task if running."""
+    global _monitor_task
+    if _monitor_task and not _monitor_task.done():
+        _monitor_task.cancel()
+    _monitor_task = None

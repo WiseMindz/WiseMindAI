@@ -1,0 +1,51 @@
+---
+description: WiseMind EXECUTION BOT (MT5 auto-trading via MetaAPI) — always-on rules + handoff pointer for Cursor
+alwaysApply: true
+---
+
+# WiseMind Execution Bot — Cursor operating rules
+
+You are continuing the **WiseMind execution bot** for Michael (WiseMindFx): the Python service
+(`bot.py`, `webhook_handler.py`, `mt5_executor.py`, `signal_utils.py`, `config.py`) that receives
+TradingView alerts, scores them, and **auto-executes trades on MetaTrader 5 via MetaAPI**, plus the
+breakeven monitor and the Telegram Claude coach. This work is shared with Claude Code via a "middle brain"
+handoff file — treat that file as the source of truth.
+
+> Sibling rule: `wisemind-ai.mdc` governs the **indicator** (`.pine`) work. THIS rule governs the
+> **bot/execution** work. They share `~/AI Coding/CLAUDE.md` as the ecosystem map.
+
+## ALWAYS read first (in this order)
+1. `docs/BOT_HANDOFF.md` — bot status + full history + how-it-works + next-task queue + run/verify. **Start here.**
+2. `~/AI Coding/CLAUDE.md` — full ecosystem map (bot + Core + Brain + HQ, rules, env vars).
+3. `docs/HANDOFF.md` — the indicator brain (what the Pine scripts send to this bot).
+
+## Hard rules (never break)
+- **CONFIRM BEFORE CHANGES.** Michael's standing rule: *"always confirm with me so you understand"* and
+  *"be precise, don't make mistakes — this is my life work."* Plan → get a yes → then edit.
+- **NEVER auto-trade without an explicit go.** Default `.env` is safe: `MT5_EXECUTION_ENABLED=false` +
+  `MT5_DRY_RUN=true`. Only flip to live when Michael says so. Leave it safe when you finish.
+- **Demo first.** Prove execution changes on the IC Markets demo (open → observe → close) before real
+  money. On real money start `MT5_MIN_GRADE=A+` and confirm `ACCOUNT_BALANCE` matches.
+- **Pine is the brain; the bot is the hand.** Execute the alert's exact entry/SL/TP. The bot only adds lot
+  size, the grade filter, and breakeven management. Never re-derive entry/SL/TP.
+- **Secrets via `.env` only.** Never hardcode the MetaAPI token / Telegram token / Claude key; never
+  commit `.env`.
+- **Verify before "done."** Syntax-check Python; prove execution changes on demo. No "this should work."
+- **DOCUMENT EVERYTHING, ALWAYS (standing order).** Proactively keep `docs/BOT_HANDOFF.md` fully current
+  every session — history, current work, AND all future/roadmap/vision (short-term, long-term, product/
+  sell ideas, even half-formed ones). Michael should never have to ask. If it isn't in the handoff, it
+  didn't happen. This is how you and Claude Code stay on the same page.
+
+## Workflow
+- Pick the **top item of `docs/BOT_HANDOFF.md` §5** unless told otherwise; propose the plan first.
+- Run/verify per BOT_HANDOFF §2: start the bot, `curl` a test signal at `/webhook`, confirm the Telegram +
+  execution result, and (for execution changes) open/close a position on demo to prove it.
+- **When you finish a slice, update the handoff** per BOT_HANDOFF §6: move the item into §3 with
+  file/function/param detail + how it was verified, update §4 if capabilities changed, re-order §5, add any
+  new `.env` keys, and leave `.env` safe + the demo account flat.
+
+## Style
+- Precision over speed; this moves real orders. Preserve the domain depth (T1/T2 AMD, sessions, sweeps,
+  FVG/OB, grades, smart SL/TP). Comment the *why*. Surface trade-offs. Only edit after Michael confirms.
+- Known gotchas (already fixed — don't reintroduce): MetaAPI rejects a `clientId` and a `+`/symbols in the
+  order comment; `metaapi-cloud-sdk` needs `anthropic>=0.105` + `httpx>=0.28` (don't re-pin httpx to 0.27).

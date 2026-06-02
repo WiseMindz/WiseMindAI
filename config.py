@@ -40,16 +40,37 @@ ACCOUNT_BALANCE = float(os.getenv("ACCOUNT_BALANCE", 50000))
 ACCOUNT_RISK_PERCENT = float(os.getenv("ACCOUNT_RISK_PERCENT", 1.0))
 ACCOUNT_CURRENCY = os.getenv("ACCOUNT_CURRENCY", "USD")
 
-# ==================== METAAPI (MT5 AUTO-EXECUTION) ====================
-METAAPI_TOKEN      = os.getenv("METAAPI_TOKEN", "")
-METAAPI_ACCOUNT_ID = os.getenv("METAAPI_ACCOUNT_ID", "")
+# ==================== MT5 FILE BRIDGE (AUTO-EXECUTION) ====================
+# Path where Python writes signal files and the WiseMindBridge EA reads them.
+# Set this to your MT5 data folder → MQL5/Files/wisemind/
+# Find it: open MT5 → File → Open Data Folder → MQL5/Files → create "wisemind" subfolder
+BRIDGE_SIGNALS_PATH = os.getenv("BRIDGE_SIGNALS_PATH", "")
 
 # Set MT5_EXECUTION_ENABLED=true in .env to go live
 MT5_EXECUTION_ENABLED = os.getenv("MT5_EXECUTION_ENABLED", "false").lower() == "true"
 
-# Dry-run: calculates + logs everything but does NOT send order to MT5
-MT5_DRY_RUN = os.getenv("MT5_DRY_RUN", "false").lower() == "true"
+# Dry-run: logs everything but does NOT write signal files to MT5
+MT5_DRY_RUN = os.getenv("MT5_DRY_RUN", "true").lower() == "true"
 
 # Minimum signal grade to execute: "A+" = only A+, "B" = A+ and B, "C" = all
 MT5_MIN_GRADE = os.getenv("MT5_MIN_GRADE", "B")
+
+# ── Breakeven monitor (replicates Pine "Auto Move SL to Breakeven") ───────────
+# When an open position reaches BE_TRIGGER_R profit, its SL is moved to entry.
+BE_ENABLED      = os.getenv("BE_ENABLED", "true").lower() == "true"
+BE_TRIGGER_R    = float(os.getenv("BE_TRIGGER_R", "1.5"))   # matches Pine beThresholdR default
+BE_BUFFER_PIPS  = float(os.getenv("BE_BUFFER_PIPS", "0"))   # 0 = pure breakeven (entry)
+BE_POLL_SECONDS = int(os.getenv("BE_POLL_SECONDS", "15"))   # how often to check positions
+
+# ── Time-expiry (replicates Pine "Auto-close after N hours" / tradeExpiryHours) ─
+EXPIRY_ENABLED  = os.getenv("EXPIRY_ENABLED", "true").lower() == "true"
+EXPIRY_HOURS    = float(os.getenv("EXPIRY_HOURS", "24"))    # 0 = off; matches Pine default 24h
+
+# ── Daily trade cap (hard global limit — once reached, no more trades that day) ─
+MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "1"))      # strict 1/day by default
+DAY_RESET_TZ       = os.getenv("DAY_RESET_TZ", "Europe/Stockholm")  # CEST day boundary
+
+# Legacy MetaAPI vars (kept so config doesn't break if still in .env)
+METAAPI_TOKEN      = os.getenv("METAAPI_TOKEN", "")
+METAAPI_ACCOUNT_ID = os.getenv("METAAPI_ACCOUNT_ID", "")
 

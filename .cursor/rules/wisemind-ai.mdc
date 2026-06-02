@@ -1,0 +1,45 @@
+---
+description: WiseMind AI (indicators + bot) — always-on project rules + handoff pointer for Cursor
+alwaysApply: true
+---
+
+# WiseMind AI — Cursor operating rules
+
+You are continuing **WiseMind AI** for Michael (WiseMindFx): the live Telegram signal bot **and** the
+TradingView **Pine Script v6 indicators** in this repo (`wise_london_v1.pine`, `wise_ny_v1.pine`,
+`wisemind_apex_v1.pine`). This work is shared with Claude Code via a "middle brain" handoff file — treat
+that file as the source of truth.
+
+## ALWAYS read first (in this order)
+1. `docs/HANDOFF.md` — current status + full history + next-task queue + push/verify steps. **Start here.**
+2. `~/AI Coding/CLAUDE.md` — full ecosystem map (bot + Core + Brain + HQ, rules, env vars).
+3. `docs/BACKTEST_NOTES.md` — evidence ledger; cite it before proposing any filter change.
+4. `WISE_LONDON_V1_SPEC.md` — complete London v1.0 technical spec.
+5. `WISE_INDICATOR_v925_PLAYBOOK.md` + `WISE_SPLIT_PLAYBOOK.md` — base logic + why it was split.
+
+## Hard rules (never break)
+- **CONFIRM BEFORE CHANGES.** Michael's standing rule: *"always confirm with me so you understand"* and
+  *"be as precise as possible, don't make mistakes — this is my life work."* Present a plan, get a yes,
+  THEN edit any `.pine`. Never edit blindly.
+- **Compile clean = 0 errors before "done."** Push to TradingView and confirm `✅ Compiled clean` (see
+  `docs/HANDOFF.md` §2). No "this should work."
+- **CE10117 compiled-token limit is real** — keep input tooltips trim; remove dead code if a build hits it.
+- **Every new behavior gets an adjustable `input.*`** with a clear tooltip. Never hardcode a tunable.
+- **EURUSD behavior must stay unchanged** when adding Gold/other-symbol features — gate by toggle or scope
+  to a symbol profile.
+- **Keep 1 signal per session** (`maxSignalsPerSession` / `nyMaxSignals` = 1) unless told otherwise —
+  Michael wants clean charts. Loosen quality filters, not the per-session cap.
+- **Secrets via env vars only.** Never hardcode keys/tokens; never commit `.env`.
+
+## Workflow
+- Pick the **top item of `docs/HANDOFF.md` §5** unless told otherwise; propose the plan first.
+- Push/verify per HANDOFF §2: stage to `~/tradingview-mcp-jackson/scripts/current.pine` →
+  `node scripts/pine_push.js` → expect "Compiled clean — 0 errors" → save. If injection fails, close the
+  Settings dialog, open the Pine editor, confirm `monaco-editor` is rendered, retry.
+- **When you finish a slice, update the handoff** per HANDOFF §6: move the item into §3 with param/line
+  detail, re-order §5, refresh the `~/Downloads/` copy if you handed Michael a file.
+
+## Style
+- Precision over speed; this is live trading code. Preserve the domain depth (T1/T2 AMD, PO3 sessions,
+  sweeps, FVG/OB PD zones, 1m precision fire, smart SL/TP chains, symbol profiles, grading).
+- Comment the *why*. Be direct; surface trade-offs. Only proceed on `.pine` edits after Michael confirms.

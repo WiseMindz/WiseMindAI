@@ -4,7 +4,8 @@ pytesseract==0.3.13
 python-telegram-bot==21.4
 fastapi==0.115.0
 uvicorn==0.30.6
-anthropic==0.37.0
-httpx==0.27.0
+anthropic>=0.105.0
+httpx>=0.28.0
 python-dotenv==1.0.1
-metaapi-cloud-sdk
+metaapi-cloud-sdk>=29.0.0
+watchdog>=4.0.0

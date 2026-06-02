@@ -35,3 +35,6 @@ ngrok.zip
 # IDE
 .vscode/
 .idea/
+# Bot runtime state
+daily_trades.json
+uploads/
