@@ -78,8 +78,22 @@ to open/close/modify test trades on demo this session).
 
 ## 3. CURRENT STATUS  ⬅️ update this section every slice
 
-**The MT5 auto-execution bot is BUILT, TESTED LIVE ON DEMO, and working.** Currently parked in safe
-dry-run (`MT5_EXECUTION_ENABLED=false`, `MT5_DRY_RUN=true`).
+**🟢 STAGE 1 LIVE: the bot is DEPLOYED on Railway and trading the IC Markets demo 24/7.**
+Deployed `2026-06-02` from GitHub `main` (commit 3fd9ab6) to the `WiseMindAI` Railway service
+(`wisemindai-production.up.railway.app`, PORT 8080). Railway vars set: METAAPI_TOKEN/ACCOUNT_ID,
+`MT5_EXECUTION_ENABLED=true`, `MT5_DRY_RUN=false`, `MT5_MIN_GRADE=B`, `ACCOUNT_BALANCE=100000`, all BE_*/
+EXPIRY_*/MAX_TRADES_PER_DAY/DAY_RESET_TZ, `WISEMIND_HQ_URL=https://wisemind-hq-production.up.railway.app`.
+Deploy logs confirmed: **"✅ MetaAPI: connected and synchronized" + "🔒 Position monitor started — BE
+1.5R / expiry 24h / poll 15s"**, account clean (getPositions []). Existing TradingView alerts already point
+at this service, so the next real A+/A/B signal auto-executes. (Local `.env` stays safe/off; the LOCAL repo
+is for dev only — do NOT run `python bot.py` locally while Railway is live or you get the Telegram 409.)
+**Watch:** a transient **Telegram getUpdates 409 Conflict** appears during redeploys (old+new container
+overlap) — harmless to execution (webhook+MetaAPI are separate from Telegram polling); resolves when the
+old deployment stops. If persistent → a 2nd instance is running (local, or an old Railway deployment still
+Active) — kill it.
+NOTE: `DAILY_STATE_PATH` not set → daily cap uses ephemeral storage → **count resets on every Railway
+redeploy** (could allow a 2nd trade after a deploy). For the demo week this is acceptable; before funded,
+add a Railway volume at `/data` and set `DAILY_STATE_PATH=/data/daily_trades.json`.
 
 ### Execution path (built this session)
 - **`mt5_executor.py`** — MetaAPI bridge:
@@ -107,6 +121,11 @@ dry-run (`MT5_EXECUTION_ENABLED=false`, `MT5_DRY_RUN=true`).
   - LIVE → `should_execute` gate → `execute_trade`. Result is appended to the Telegram message
     (✅ EXECUTED / ❌ FAILED / ⏭️ skipped / 🔬 dry run).
   - **lifespan** starts MetaAPI + BE monitor on boot (live mode) and stops them on shutdown.
+- **`safety.py` (Phase 0)** — kill switch + daily loss limit. `is_paused()/set_paused()` (Telegram
+  `/pause` `/resume`, admin-gated to `ADMIN_USER_ID`); `check_daily_loss(equity, MAX_DAILY_LOSS_PCT, tz)`
+  auto-stops trading for the day at −2% (sticky); `/status` shows live/paused, MetaAPI, trades today, loss
+  state, equity. Error alerts ping Telegram on a failed order (`ERROR_ALERTS`). State persisted to
+  `bot_state.json` (volume). Tested on demo.
 - **`daily_limit.py`** — strict global **daily trade cap** (`MAX_TRADES_PER_DAY`, default **1**). Once the
   day's quota of *executed* trades is reached, the bot **ignores ALL further signals that day** (every
   asset/session/indicator). Only real fills count (grade-skipped/failed don't burn a slot). Count is
@@ -278,6 +297,24 @@ user's local MT5 app is **NOT** in the trade path — it's only a viewing window
 
 ---
 
+## 5A. ✅ PHASE 0 SAFETY — BUILT & TESTED (code done; deploy steps below)
+Params: `ADMIN_USER_ID=5082485728`, `MAX_DAILY_LOSS_PCT=2`, `ERROR_ALERTS=true`,
+`DAILY_STATE_PATH=/data/daily_trades.json` (needs Railway volume at /data). All steps DONE:
+- [x] 1. `config.py` — ADMIN_USER_ID, MAX_DAILY_LOSS_PCT, ERROR_ALERTS
+- [x] 2. `safety.py` (NEW) — `is_paused()/set_paused()`, `check_daily_loss()` (sticky day block),
+      `loss_status()`; state in `bot_state.json` next to the daily file (volume-persisted)
+- [x] 3. `mt5_executor.py` — `get_account_equity()`
+- [x] 4. `webhook_handler.py` — gating order: paused → grade → (lock) daily-cap → daily-loss → execute;
+      error-alert Telegram on failed order; Telegram lines for paused / loss-blocked
+- [x] 5. `bot.py` — `/pause` `/resume` (admin-gated to ADMIN_USER_ID) + `/status` (anyone)
+- [x] 6. `.env` — keys added (local)
+- [x] 7. Tested: pause on/off ✅; daily loss blocks at exactly −2% and stays sticky ✅; `import bot` clean ✅
+**REMAINING TO GO LIVE (deploy):** commit+push; on Railway bot service add vars `ADMIN_USER_ID=5082485728`,
+`MAX_DAILY_LOSS_PCT=2`, `ERROR_ALERTS=true`, `DAILY_STATE_PATH=/data/daily_trades.json`, AND **add a Volume
+mounted at `/data`** (Settings → Volumes) so state persists across redeploys. Then verify logs.
+KNOWN LIMITATION (logged): daily-loss baseline = first equity the bot sees that day (lazy). Fine for demo;
+before funded, refine to the broker's true day-start balance (server-midnight) for exact prop-firm DD.
+
 ## 5B. WISEMIND HQ INTEGRATION + PRODUCT / SELLABILITY ROADMAP (vision — keep current)
 
 ### WiseMind HQ — how it connects today
@@ -315,6 +352,52 @@ user's local MT5 app is **NOT** in the trade path — it's only a viewing window
   survives redeploys. Re-verify against FundingTraders' max daily-loss + drawdown rules.
 - Resolve the Telegram getUpdates conflict by running execution **only on Railway** (local = dev) once
   Stage 1 starts.
+
+### 🧠 "Thinking agent" vision (Michael wants the bot to be its own intelligent agent)
+The bot ALREADY has a brain (Claude Haiku/Sonnet powering the Telegram coach). To make it a true
+*thinking agent* (not hype), add 4 layers — all advisory/analytical, never overriding the deterministic
+strategy:
+- **(A) Reasoning-per-trade.** On each signal, Claude analyses it + live context (open positions, today's
+  P&L, recent results, optional news/calendar) and posts a verdict + explanation to Telegram/HQ ("A+ London
+  T2 after clean Asia sweep, HTF aligned — high confidence"). Post-trade debrief too. Can FLAG, and with
+  DETERMINISTIC guardrails optionally gate, but never invents prices or moves SL/TP.
+- **(B) Memory + learning** (= the confirmed analytics loop): persist every trade with full context →
+  running stats → Claude reasons over history → evolving recommendations Michael approves.
+- **(C) Tools / agency** (tool-calling): give Claude functions — get_positions, get_stats, get_news,
+  get_account, close_position (approval-gated) — so it can answer "how am I doing today?", "worried about
+  this trade?", and take *approved* actions.
+- **(D) Proactive briefings**: morning pre-session brief (news, Asia range, bias) + evening debrief.
+GUARDRAILS (hard): LLM ADVISES, deterministic rules EXECUTE; the edge is the Pine strategy, not the LLM;
+never let it override entry/SL/TP or invent data; Michael approves any rule change; no self-mutating ML.
+**Michael wants: daily briefings + memory/learning loop + tool agency (and the full improvement plan).**
+
+### 📚 FULL IMPROVEMENT CATALOG (everything that would make the bot better — Michael asked for all of it)
+1. **Safety/governance (DO BEFORE FUNDED):** Telegram kill-switch `/pause` `/resume`; error alerting
+   (ping Michael if an execution fails); **daily loss limit** (stop trading at −X% day) + **max drawdown
+   guard**; persistent state volume (`/data`) so the daily cap survives redeploys; signal idempotency /
+   dedup (don't double-execute a retried/duplicate webhook); heartbeat ("bot alive") ping.
+2. **Intelligence (the agent):** reasoning-per-trade + post-trade debrief; daily briefings; memory+learning
+   loop (journal→stats→advice); tool agency (Claude functions: positions/stats/news/account/close-with-
+   approval); `/positions` `/close` Telegram commands.
+3. **Execution polish:** trailing stop (after BE); partial TP / scale-out (e.g. 50% at 2R, runner to TP);
+   spread guard + slippage guard (skip if market moved too far from Pine entry); news-blackout window.
+4. **Risk:** equity-based lot sizing (size off live equity, not fixed balance); per-session caps.
+5. **Observability:** HQ execution-event merge (signal→exec→BE→close live on dashboard); equity curve +
+   WR by grade/session/asset; log EVERY signal (even non-traded) for analysis.
+6. **Scale/product:** multi-account fan-out; multi-tenant SaaS (per-user broker + billing); indicator
+   licensing; 2-year stats site.
+RECOMMENDED ORDER (Michael's stage = demo week → $50k funded): **Phase 0 safety essentials first**
+(kill-switch, error alerts, daily-loss limit, /data volume) BEFORE funded; then the intelligence layers;
+then execution polish; then HQ merge + scale.
+**CONFIRMED by Michael — Phase 0 = NEXT BUILD (build order locked):**
+- Kill switch `/pause` `/resume` `/status` — **gated to Michael's Telegram user ID only** (`ADMIN_USER_ID`).
+- Error alerting on failed execution / MetaAPI disconnect (`ERROR_ALERTS=true`).
+- **Daily loss limit = 2%** (`MAX_DAILY_LOSS_PCT=2`; tracks day-start equity vs current; auto-stop for the
+  day when breached).
+- Persistent state on Railway `/data` volume (`DAILY_STATE_PATH=/data/daily_trades.json` + pause/equity
+  state) so redeploys can't reset the cap or un-pause.
+- STANDING RULE reinforced: **always confirm with Michael before building** (see §1).
+- BLOCKER: need Michael's numeric **Telegram user ID** (via @userinfobot) for the admin gate, then go.
 
 ### Proposed directions (discussed, awaiting Michael's go — do NOT build yet)
 - **Learning feedback loop (RECOMMENDED form of "make it learn").** Record every executed trade with full

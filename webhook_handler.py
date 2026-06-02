@@ -36,11 +36,14 @@ from config import (
     EXPIRY_HOURS,
     MAX_TRADES_PER_DAY,
     DAY_RESET_TZ,
+    MAX_DAILY_LOSS_PCT,
+    ERROR_ALERTS,
 )
 from database import save_trade, save_message
 from signal_utils import evaluate_signal
 import mt5_executor
 import daily_limit
+import safety
 
 # WiseMind HQ forwarding — set WISEMIND_HQ_URL in .env if needed
 WISEMIND_HQ_URL = os.getenv("WISEMIND_HQ_URL", "")
@@ -316,6 +319,10 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
             msg += f"⏭️ <i>MT5 skipped — grade {exec_result.get('grade','?')} below min {exec_result.get('min_grade','?')}</i>\n"
         elif exec_result.get("daily_limit"):
             msg += f"⛔ <b>Daily limit reached</b> ({exec_result.get('used','?')}/{exec_result.get('max','?')}) — <i>signal logged, NOT traded</i>\n"
+        elif exec_result.get("paused"):
+            msg += "⏸ <b>Bot PAUSED</b> — <i>signal logged, NOT traded</i>\n"
+        elif exec_result.get("loss_blocked"):
+            msg += f"🛑 <b>Daily loss limit hit</b> (−{exec_result.get('loss_pct','?')}% ≥ −{exec_result.get('max_loss','?')}%) — <i>trading stopped today</i>\n"
         elif exec_result.get("success") is True:
             entry_px = exec_result.get("entry_price", "")
             order_id = exec_result.get("order_id", "")
@@ -470,16 +477,35 @@ async def receive_webhook(request: Request):
             logger.info(f"🔬 DRY RUN: would execute → {data['side']} {lot_calc['lot']} {data['symbol']} [{session}] (grade {grade})")
 
         elif MT5_EXECUTION_ENABLED:
-            if mt5_executor.should_execute(grade, MT5_MIN_GRADE):
-                # ── Daily trade cap (strict global limit) ─────────────────────
+            # ── Phase 0 Safety: kill switch (pause) ───────────────────────────
+            if safety.is_paused():
+                exec_result = {"success": None, "paused": True, "grade": grade}
+                logger.info(f"⏸ PAUSED — signal logged, NOT traded ({data['symbol']} {grade})")
+
+            elif not mt5_executor.should_execute(grade, MT5_MIN_GRADE):
+                exec_result = {"success": None, "skipped": True, "grade": grade, "min_grade": MT5_MIN_GRADE}
+                logger.info(f"⏭️  MT5 skipped — grade {grade} < min {MT5_MIN_GRADE}")
+
+            else:
                 # Hold the lock across check→execute→record so two near-simultaneous
-                # signals can never both slip past the cap.
+                # signals can never both slip past the daily cap.
                 async with daily_limit.LOCK:
                     used = daily_limit.count_today(DAY_RESET_TZ)
+                    # ── Daily loss limit ──────────────────────────────────────
+                    loss = {"blocked": False, "loss_pct": 0.0}
+                    if MAX_DAILY_LOSS_PCT > 0:
+                        equity = await mt5_executor.get_account_equity()
+                        if equity is not None:
+                            loss = safety.check_daily_loss(equity, MAX_DAILY_LOSS_PCT, DAY_RESET_TZ)
+
                     if used >= MAX_TRADES_PER_DAY:
                         exec_result = {"success": None, "daily_limit": True,
                                        "used": used, "max": MAX_TRADES_PER_DAY}
                         logger.info(f"⛔ Daily cap reached ({used}/{MAX_TRADES_PER_DAY}) — signal NOT traded")
+                    elif loss["blocked"]:
+                        exec_result = {"success": None, "loss_blocked": True,
+                                       "loss_pct": round(loss["loss_pct"], 2), "max_loss": MAX_DAILY_LOSS_PCT}
+                        logger.warning(f"🛑 Daily loss limit (-{loss['loss_pct']:.2f}% ≥ -{MAX_DAILY_LOSS_PCT}%) — signal NOT traded")
                     else:
                         logger.info(f"Executing on MT5: {data['side']} {lot_calc['lot']} {data['symbol']} [{session}] (grade {grade}) — {used+1}/{MAX_TRADES_PER_DAY} today")
                         exec_result = await mt5_executor.execute_trade(
@@ -491,10 +517,8 @@ async def receive_webhook(request: Request):
                             comment = f"WiseMind {session} {grade}",
                         )
                         if exec_result and exec_result.get("success"):
-                            # Count this trade against today's cap (only real fills count)
                             new_count = daily_limit.record(DAY_RESET_TZ)
                             logger.info(f"Daily count now {new_count}/{MAX_TRADES_PER_DAY}")
-                            # Exact-settings parity: per-position settings from Pine (fallback to .env)
                             if exec_result.get("order_id"):
                                 def _num(v):
                                     try:
@@ -506,9 +530,19 @@ async def receive_webhook(request: Request):
                                     be_trigger_r = _num(data.get("be_trigger_r")),
                                     expiry_hours = _num(data.get("expiry_hours")),
                                 )
-            else:
-                exec_result = {"success": None, "skipped": True, "grade": grade, "min_grade": MT5_MIN_GRADE}
-                logger.info(f"⏭️  MT5 skipped — grade {grade} < min {MT5_MIN_GRADE}")
+
+            # ── Error alerting: ping Telegram on a failed order ──────────────
+            if ERROR_ALERTS and exec_result and exec_result.get("success") is False:
+                try:
+                    await telegram_bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=(f"❌ <b>EXECUTION FAILED</b>\n{data.get('symbol')} {data.get('side')} "
+                              f"[{session}] {grade}\n<i>{exec_result.get('error','unknown error')}</i>\n"
+                              f"⚠️ Check the bot."),
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    logger.error(f"Error-alert send failed: {e}")
         # ── End MT5 Execution ─────────────────────────────────────────────────
 
         try:

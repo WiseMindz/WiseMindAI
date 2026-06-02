@@ -70,6 +70,11 @@ EXPIRY_HOURS    = float(os.getenv("EXPIRY_HOURS", "24"))    # 0 = off; matches P
 MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "1"))      # strict 1/day by default
 DAY_RESET_TZ       = os.getenv("DAY_RESET_TZ", "Europe/Stockholm")  # CEST day boundary
 
+# ── Phase 0 Safety: kill switch, daily loss limit, error alerts ────────────────
+ADMIN_USER_ID      = get_int_env("ADMIN_USER_ID", default=0)        # Telegram user allowed to /pause /resume (0 = anyone)
+MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0"))    # auto-stop at -X% equity for the day (0 = off)
+ERROR_ALERTS       = os.getenv("ERROR_ALERTS", "true").lower() == "true"  # Telegram ping on failed order / disconnect
+
 # Legacy MetaAPI vars (kept so config doesn't break if still in .env)
 METAAPI_TOKEN      = os.getenv("METAAPI_TOKEN", "")
 METAAPI_ACCOUNT_ID = os.getenv("METAAPI_ACCOUNT_ID", "")

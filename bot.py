@@ -364,6 +364,56 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ WiseMind AI är online och redo!")
 
 
+# ── Phase 0 Safety commands (kill switch + status) ────────────────────────────
+import safety as _safety
+import daily_limit as _daily_limit
+import mt5_executor as _mt5
+from config import ADMIN_USER_ID, MAX_DAILY_LOSS_PCT, DAY_RESET_TZ, MAX_TRADES_PER_DAY
+
+
+def _is_admin(update: Update) -> bool:
+    # ADMIN_USER_ID == 0 means no restriction; otherwise only that user
+    return ADMIN_USER_ID == 0 or (update.effective_user and update.effective_user.id == ADMIN_USER_ID)
+
+
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update):
+        logger.info(f"/pause denied for user {update.effective_user.id}")
+        await update.message.reply_text("🚫 Not authorized. Only the admin can pause the bot.")
+        return
+    _safety.set_paused(True)
+    await update.message.reply_text("⏸ <b>Bot PAUSED.</b> Signals are logged but NO trades execute.\nUse /resume to re-enable.", parse_mode="HTML")
+
+
+async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update):
+        logger.info(f"/resume denied for user {update.effective_user.id}")
+        await update.message.reply_text("🚫 Not authorized. Only the admin can resume the bot.")
+        return
+    _safety.set_paused(False)
+    await update.message.reply_text("▶️ <b>Bot RESUMED.</b> Trading is live again.", parse_mode="HTML")
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    paused = _safety.is_paused()
+    used = _daily_limit.count_today(DAY_RESET_TZ)
+    connected = _mt5.is_connected()
+    ls = _safety.loss_status(DAY_RESET_TZ)
+    equity = await _mt5.get_account_equity() if connected else None
+
+    lines = [
+        "📊 <b>WiseMind Bot Status</b>",
+        f"State: {'⏸ PAUSED' if paused else '▶️ LIVE'}",
+        f"MetaAPI: {'✅ connected' if connected else '❌ disconnected'}",
+        f"Trades today: {used}/{MAX_TRADES_PER_DAY}",
+        f"Daily loss limit: {'-' + str(MAX_DAILY_LOSS_PCT) + '%' if MAX_DAILY_LOSS_PCT > 0 else 'off'}"
+        + (" 🛑 HIT" if ls.get("blocked") else ""),
+    ]
+    if equity is not None:
+        lines.append(f"Equity: {equity}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
 async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/last from user {update.effective_user.id}")
     try:
@@ -534,6 +584,9 @@ async def run_bot_and_webhook():
     bot_app.add_handler(CommandHandler("start", cmd_start))
     bot_app.add_handler(CommandHandler("last", cmd_last))
     bot_app.add_handler(CommandHandler("clearmemory", cmd_clear_memory))
+    bot_app.add_handler(CommandHandler("pause", cmd_pause))
+    bot_app.add_handler(CommandHandler("resume", cmd_resume))
+    bot_app.add_handler(CommandHandler("status", cmd_status))
     bot_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     bot_app.add_error_handler(error_handler)

@@ -81,6 +81,18 @@ def is_connected() -> bool:
     return _connected
 
 
+async def get_account_equity() -> Optional[float]:
+    """Return current account equity (for the daily loss limit), or None if unavailable."""
+    if not _connected or _connection is None:
+        return None
+    try:
+        info = await _connection.get_account_information()
+        return float(info.get("equity"))
+    except Exception as e:
+        logger.error(f"get_account_equity failed: {type(e).__name__}: {str(e)[:120]}")
+        return None
+
+
 # ── Grade filter ──────────────────────────────────────────────────────────────
 
 def should_execute(rating: str, min_grade: str) -> bool:
