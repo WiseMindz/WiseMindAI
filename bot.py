@@ -361,7 +361,31 @@ async def claude_response(user_text: str, chat_id: int, username: str):
 # ==================== KOMMANDON ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/start from user {update.effective_user.id}")
-    await update.message.reply_text("✅ WiseMind AI är online och redo!")
+    await update.message.reply_text("✅ WiseMind AI är online och redo!\nSkriv /help för alla kommandon.")
+
+
+HELP_TEXT = (
+    "🤖 <b>WiseMind Bot — Commands</b>\n\n"
+    "<b>📊 Status & Safety</b>\n"
+    "/status — bot state · MetaAPI · trades today · equity\n"
+    "/pause — stop executing trades (admin only)\n"
+    "/resume — resume executing (admin only)\n\n"
+    "<b>📈 Performance & Coaching</b>\n"
+    "/stats — win rate · expectancy · by session/symbol\n"
+    "/review — Claude analyzes your trade history\n"
+    "/ask &lt;question&gt; — ask about your account/stats\n"
+    "    e.g. /ask how am I doing today?\n\n"
+    "<b>🗓 Briefings</b>\n"
+    "/brief — fire a daily brief now (auto: 08:30 &amp; 17:30 CEST)\n\n"
+    "<b>💼 Trades</b>\n"
+    "/close [SYMBOL|all] — close trades (admin only)\n"
+    "/last — show the last trade\n\n"
+    "/help — this list"
+)
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(HELP_TEXT, parse_mode="HTML")
 
 
 # ── Phase 0 Safety commands (kill switch + status) ────────────────────────────
@@ -670,6 +694,8 @@ async def run_bot_and_webhook():
     # 2. Build Telegram bot application
     bot_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     bot_app.add_handler(CommandHandler("start", cmd_start))
+    bot_app.add_handler(CommandHandler("help", cmd_help))
+    bot_app.add_handler(CommandHandler("commands", cmd_help))
     bot_app.add_handler(CommandHandler("last", cmd_last))
     bot_app.add_handler(CommandHandler("clearmemory", cmd_clear_memory))
     bot_app.add_handler(CommandHandler("pause", cmd_pause))

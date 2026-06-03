@@ -323,11 +323,19 @@ Volume `/data` created on Railway ✅. Build order: memory → briefings → too
   session/symbol, recent streak; `format_stats`, `build_review_prompt`). `bot.py` commands **`/stats`**
   (numbers) + **`/review`** (Claude analyses history → data-backed recommendations, advisory only).
   Tested locally (1 result → 100% WR, 5R). ⚠️ MUST set Railway var `DATABASE_PATH=/data/trades.db`.
-- [ ] **STEP 2 — Daily briefings:** 08:30 + 17:30 CEST (asyncio scheduler in bot.py; Claude posts
-  pre-London brief + post-NY review to TELEGRAM_CHAT_ID). NOT built yet.
-- [ ] **STEP 3 — Tool agency:** Claude tool-calling in the Telegram handler — read-only (get_positions/
-  get_stats/get_account) automatic; **ALL write/actions (close, pause, anything) require Michael's
-  explicit approval before executing** (per Michael). NOT built yet.
+- [x] **STEP 2 — Daily briefings (DONE, deployed):** `briefings.py` self-pacing asyncio scheduler started
+  in `bot.py` boot; morning 08:30 / evening 17:30 CEST (`BRIEF_MORNING`/`BRIEF_EVENING`, `BRIEFINGS_ENABLED`);
+  Claude writes from real stats only. `/brief` fires one on demand. Tested (next-fire timing correct).
+- [x] **STEP 3 — Tool agency (DONE, tested live, deployed):** `agent_tools.py` read-only Claude tool-use
+  loop (`get_open_positions`, `get_account`, `get_stats`). `bot.py` **`/ask <q>`** (agent looks + answers —
+  tested live: fetched real balance/equity/positions) and **`/close [SYMBOL|all]`** (admin-gated = Michael's
+  approval). Write actions are NOT given to the LLM — only Michael's explicit commands execute them, per his
+  rule. `mt5_executor.py` added get_account_info/get_open_positions/close_position_by_id.
+**🧠 PHASE 1 BRAIN COMPLETE** (memory + briefings + tool agency). Commands now: /pause /resume /status
+/stats /review /brief /ask /close. **Railway vars still to add for full effect:** `DATABASE_PATH=/data/
+trades.db`, `DAILY_STATE_PATH=/data/daily_trades.json` (+ Phase 0: ADMIN_USER_ID, MAX_DAILY_LOSS_PCT,
+ERROR_ALERTS). Briefings default ON. **Next unbuilt: Phase 2 execution polish (trailing/partial TP, news
+blackout) + HQ execution merge.**
 
 ## 5B. WISEMIND HQ INTEGRATION + PRODUCT / SELLABILITY ROADMAP (vision — keep current)
 
@@ -419,6 +427,19 @@ then execution polish; then HQ merge + scale.
 - STANDING RULE reinforced: **always confirm with Michael before building** (see §1).
 - BLOCKER: need Michael's numeric **Telegram user ID** (via @userinfobot) for the admin gate, then go.
 
+### 💡 Live setup play-by-play (Michael's idea — confirm before build)
+Michael wants real-time updates as a setup FORMS: "Asia sweep occurred", "displacement confirmed",
+"price tapped PD zone", "engulf forming — trade about to fire", "criterion X hit". HOW it works (honest):
+the deployed bot/Claude CANNOT browse TradingView live — it only knows what the Pine indicator SENDS it.
+So this needs **intermediate `alert()` calls added in the Pine indicator** at each stage (sweep / displace /
+PD touch / engulf-forming / fired / invalidated) → bot receives them on /webhook as "stage" events →
+posts to Telegram, optionally narrated by Claude → live play-by-play. REQUIRES: (1) Pine edits = indicator
+project (`docs/HANDOFF.md`, confirm + TradingView push); (2) watch TradingView alert-slot limits (Pro=20,
+Premium=400) — stage alerts × assets add up; (3) bot: handle a `stage`/`event` field in the webhook +
+format/narrate. Great for engagement + (in SaaS) broadcast to all users. Status: idea logged, awaiting go.
+NOTE: live `/status` + `/brief` verified working on Railway 2026-06-02 (brief rendered in English). Minor:
+`/help` command listing all commands not built yet (Michael tried /commands).
+
 ### Proposed directions (discussed, awaiting Michael's go — do NOT build yet)
 - **Learning feedback loop (RECOMMENDED form of "make it learn").** Record every executed trade with full
   context (setup, grade, session, asset, planned/achieved R, BE-hit, win/loss) → compute running stats
@@ -434,6 +455,39 @@ then execution polish; then HQ merge + scale.
   **Remaining (Part 2):** make Pine actually SEND those two values in the London+NY alert JSON so they can
   never drift — separate indicator-project edit, needs go + TradingView push.
 
+### 🧩 SaaS GAP ANALYSIS — what's MISSING to serve hundreds of users (Michael asked "what's missing")
+Today = SINGLE-tenant: ONE bot, ONE MetaAPI account, GLOBAL env-var settings, ONE Telegram chat, admin-only
+dashboard, SQLite, signals from Michael's own TradingView. To sell to hundreds, the missing layers:
+1. **Signal fan-out rearchitecture (the core change).** Signals come CENTRALLY from Michael's indicators →
+   ONE webhook → **fan out to every subscribed user's account**, each sized + filtered by THEIR settings.
+   Users do NOT set up their own TradingView. Needs an async fan-out engine + per-user execution + rate-limit
+   handling for many MetaAPI accounts.
+2. **Per-user broker connect.** Each user connects THEIR MT5 (login/pwd/server) → HQ provisions a MetaAPI
+   account for them via MetaAPI provisioning API. (Currently one global METAAPI_TOKEN/ACCOUNT_ID.)
+3. **Per-user settings in DB** (not env vars): risk%, assets, min-grade, BE, expiry, daily cap, daily loss,
+   pause — each editable by the user from their dashboard.
+4. **Per-user state + isolation:** daily cap / pause / loss-limit / journal / stats all per-user in the DB;
+   user A never sees/touches user B. (Currently global JSON files.)
+5. **Personalized dashboard (Michael's explicit ask).** Every member logs in and sees ONLY their own
+   equity, trades, stats, journal, and can edit ALL their settings + connect their broker themselves.
+   Admin (Michael) sees aggregate/all. Onboarding flow: signup → connect broker → set prefs → go live.
+6. **Billing (Stripe):** subscriptions/plans/trial/cancel; gate execution to paying users; pricing must
+   cover ~$9/mo per MetaAPI account.
+7. **Bilingual AI coach (Michael's ask):** English-primary system prompt that **speaks both Swedish and
+   English** (detect user language, reply in kind); per-user coach memory + per-user stats context.
+8. **Postgres (not SQLite):** hundreds of users with concurrent writes need a real DB; move HQ + bot off
+   SQLite to Postgres (Railway Postgres plugin).
+9. **Per-user reliability:** one user's broker error must not affect others; connection pooling for many
+   MetaAPI accounts; per-user error alerts.
+10. **Security/compliance:** encrypt stored broker creds; password reset + 2FA; **GDPR** (EU/Swedish users),
+    ToS, risk disclaimers, privacy policy; regulatory/licensing review for selling automated trading.
+11. **Admin tooling:** all-users view, per-user + global kill switch, subscription mgmt, support, broadcasts.
+12. **Indicator licensing:** TradingView invite-only access tied to subscription status.
+GAP SUMMARY: the engine (execution, BE, expiry, grades, safety, brain) is BUILT for one account; the
+missing ~80% of the *product* is the **multi-tenant layer**: fan-out, per-user broker+settings+state+
+dashboard, billing, Postgres, bilingual coach, security/legal. Recommended order: Postgres → per-user
+auth/settings/dashboard → per-user broker connect → signal fan-out → bilingual coach → billing → legal.
+
 ### Product / Sellability roadmap (the "sell the bot + indicator" vision)
 Aligns with Michael's existing **500-student release gameplan** (see memory + WiseMindBrain MASTER).
 ```
@@ -446,6 +500,22 @@ Aligns with Michael's existing **500-student release gameplan** (see memory + Wi
           (Stripe), per-user execution dashboard.
  Phase 5  Sell: indicator licensing (TradingView invite-only scripts + access mgmt) + bot subscription;
           disclaimers, risk warnings, ToS.
+```
+**DISTRIBUTION MODELS (how to actually sell it — "downloadable app" is NOT the right model for a
+server/API bot):**
+1. **SaaS multi-tenant (RECOMMENDED — already ~80% there).** Michael hosts ONE bot; customers sign up on
+   WiseMind HQ (HQ already has user accounts/auth!), connect THEIR OWN broker (their MetaAPI account),
+   set their risk, pay a subscription (Stripe). They download nothing — just log in. Needs: per-user
+   broker connect + per-user settings + isolation + billing + licensing.
+2. **Self-host package (the literal "downloadable").** Sell the repo/Docker + a Railway one-click; buyer
+   runs it on their own Railway + their own MetaAPI. Lower hosting burden on Michael but HIGH setup-support
+   burden + code-piracy risk. Suits technical buyers only.
+3. **Copy-trading / managed.** One master account; customers connect their account and MIRROR Michael's
+   trades (MetaAPI CopyFactory). They run nothing.
+4. **Indicator-only license + DIY guide.** Sell the TradingView invite-only indicator + a setup template.
+Constraints: MetaAPI bills ~$9/mo PER account (pricing/architecture decision at scale); regulation/
+licensing exposure (esp. managed/copy); disclaimers + ToS required; support load. Recommended path: SaaS
+(model 1) since HQ user-accounts already exist.
 ```
 **MetaAPI account-edit settings (verified on the demo, all left at defaults — nothing needs changing):**
 account `bd1c91cb…`, login 52879989, server `ICMarketsEU-Demo` (valid ✓), magic 0, max slippage 30,
