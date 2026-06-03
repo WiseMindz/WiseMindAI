@@ -420,6 +420,54 @@ async def root():
     return {"status": "WiseMind Webhook Receiver är igång", "version": "9.23"}
 
 
+# ==================== STAGE-BY-STAGE SETUP ALERTS ====================
+import time as _time
+
+# Dedupe: (symbol, stage, session) -> last post timestamp. Suppresses repeats within the window.
+_stage_last: dict = {}
+_STAGE_DEDUPE_SECONDS = 90
+
+# Only these stages are broadcast (Michael's choice: sweep, armed, invalidated;
+# 'fired' goes through the normal execution/signal path).
+_STAGE_BROADCAST = {"sweep", "armed", "invalidated"}
+
+
+async def handle_stage(data: dict):
+    """Format + post a clean factual stage line as a setup forms (no Claude narration)."""
+    if data.get("secret") != WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid secret")
+
+    stage   = str(data.get("stage", "")).lower().strip()
+    symbol  = data.get("symbol", "?")
+    session = data.get("session", "")
+    detail  = str(data.get("detail", "")).strip()
+
+    if stage not in _STAGE_BROADCAST:
+        return {"status": "ignored", "stage": stage}
+
+    # Dedupe identical stage spam within the window
+    key = (symbol, stage, session)
+    now = _time.time()
+    if now - _stage_last.get(key, 0) < _STAGE_DEDUPE_SECONDS:
+        return {"status": "deduped", "stage": stage}
+    _stage_last[key] = now
+
+    sess_tag = f" [{session}]" if session else ""
+    if stage == "sweep":
+        msg = f"🌊 <b>{symbol}</b>: {detail or 'liquidity swept'} — setup forming{sess_tag}"
+    elif stage == "armed":
+        msg = f"🔔 <b>{symbol}</b>: criteria met — trade may fire next bar{sess_tag}"
+    else:  # invalidated
+        msg = f"❌ <b>{symbol}</b>: setup invalidated — {detail or 'stood down'}{sess_tag}"
+
+    try:
+        await telegram_bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode="HTML")
+        logger.info(f"Stage posted: {stage} {symbol}{sess_tag}")
+    except Exception as e:
+        logger.warning(f"Stage post failed: {e}")
+    return {"status": "ok", "stage": stage}
+
+
 @app.post("/webhook")
 async def receive_webhook(request: Request):
     try:
@@ -429,6 +477,11 @@ async def receive_webhook(request: Request):
         if data.get("event") == "trade_result":
             return await handle_trade_result(data)
         # ── End Trade Result routing ─────────────────────────────────────────
+
+        # ── Stage-by-stage setup alerts (sweep / armed / invalidated) ─────────
+        if data.get("event") == "stage":
+            return await handle_stage(data)
+        # ── End Stage routing ────────────────────────────────────────────────
 
         if not all(field in data for field in ["symbol", "side", "entry", "sl", "tp"]):
             alert_text = data.get("alert_message") or data.get("message") or data.get("text")

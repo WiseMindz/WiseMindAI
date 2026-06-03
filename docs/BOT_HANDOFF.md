@@ -427,6 +427,29 @@ then execution polish; then HQ merge + scale.
 - STANDING RULE reinforced: **always confirm with Michael before building** (see §1).
 - BLOCKER: need Michael's numeric **Telegram user ID** (via @userinfobot) for the admin gate, then go.
 
+### 📡 STAGE-BY-STAGE ALERTS — DETAILED SPEC (awaiting Michael's final confirm, then build)
+Target indicators: **`wise_london_v1.pine` + `wise_ny_v1.pine`** (Downloads: `wise_ny_v.2.pine`). `/help`
+command = DONE & deployed (lists all commands, /commands alias).
+**STAGES to broadcast as a setup forms** (each = a Pine `alert()` call with JSON `event:"stage"`):
+  1. 🌊 `sweep` — Asia/London/Prev-NY H/L swept (setup begins)
+  2. ⚡ `displacement` — price moved ≥ X×ATR from swept level (T2)
+  3. 🎯 `pd_touch` — price retraced into FVG/OB PD zone (T2)
+  4. 🔔 `armed` — engulf forming / all criteria nearly met, trade imminent
+  5. ✅ `fired` — actual entry (EXISTING signal path — already executes)
+  6. ❌ `invalidated` — setup died (session end / opposite sweep / no engulf)
+**Webhook JSON:** `{"secret":"wisemind2026","event":"stage","stage":"sweep","symbol":"EURUSD",
+"session":"London","detail":"Asia Low swept","level":1.0905,"trade":"T2"}`.
+**Bot side (easy):** `webhook_handler` routes `event:"stage"` → format a Telegram line (+ optional Claude
+narration) → post. Stages do NOT execute (only `fired` executes via the existing path). Add dedupe so the
+same stage isn't spammed.
+**Pine side (the work):** add `alert()` calls at each stage in BOTH indicators — this is INDICATOR-project
+work (`docs/HANDOFF.md`, confirm + TradingView push/compile-clean). CORRECTION on alert limits: all
+`alert()` calls flow through ONE "Any alert() function call" alert config per indicator/asset (6 total) —
+so **alert SLOTS are NOT a problem**; the only concern is Telegram noise → be selective + dedupe.
+**DECISIONS to confirm with Michael before build:** (a) which stages to broadcast (all 6, or a subset to
+reduce noise?); (b) Claude narration ON each stage (AI color, +latency/cost) vs clean factual line;
+(c) confirmed both indicators. Build order: bot-side stage handler first (safe, no Pine), then Pine alerts.
+
 ### 💡 Live setup play-by-play (Michael's idea — confirm before build)
 Michael wants real-time updates as a setup FORMS: "Asia sweep occurred", "displacement confirmed",
 "price tapped PD zone", "engulf forming — trade about to fire", "criterion X hit". HOW it works (honest):
