@@ -322,8 +322,13 @@ CHALLENGE. Keep `MAX_TRADES_PER_DAY=1`, `MT5_MIN_GRADE=A+` for the challenge.
   per account.
 - Telegram exec line shows WHICH account each fill hit.
 - Tests: per-account sizing, fan-out to N accounts, one account failing doesn't block others.
-STATUS: spec logged; building additive core (off by default). Max-DD guard (5A note) also mid-wire (config+
-safety added, inert) — finish it per-account as part of this.
+STATUS (2026-06): **DEFERRED by Michael** — going SINGLE-account on FundingTraders now; Michael will create
+a matching **50k IC demo** later, THEN build multi-account fan-out per this spec (test on IC demo, real
+trades on both). Multi-account config start was reverted (clean). Spec above stays the build plan.
+**✅ MAX-DRAWDOWN GUARD — DONE & deployed (commit 86b3ea5):** `safety.check_total_drawdown(equity,
+ACCOUNT_BALANCE, MAX_TOTAL_DD_PCT)` blocks new trades + **auto-pauses** the bot when equity drops ≥
+`MAX_TOTAL_DD_PCT` (default 8, under FundingTraders ~10%) below the challenge start balance; sticky; webhook
+gate + Telegram alert + `/status` line. Tested (blocks at −8%, auto-pause, sticky; 35 tests green).
 
 ## 5A. ✅ PHASE 0 SAFETY — BUILT & TESTED (code done; deploy steps below)
 Params: `ADMIN_USER_ID=5082485728`, `MAX_DAILY_LOSS_PCT=2`, `ERROR_ALERTS=true`,
