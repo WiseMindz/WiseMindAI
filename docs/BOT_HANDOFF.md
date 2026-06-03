@@ -446,9 +446,26 @@ same stage isn't spammed.
 work (`docs/HANDOFF.md`, confirm + TradingView push/compile-clean). CORRECTION on alert limits: all
 `alert()` calls flow through ONE "Any alert() function call" alert config per indicator/asset (6 total) —
 so **alert SLOTS are NOT a problem**; the only concern is Telegram noise → be selective + dedupe.
-**DECISIONS to confirm with Michael before build:** (a) which stages to broadcast (all 6, or a subset to
-reduce noise?); (b) Claude narration ON each stage (AI color, +latency/cost) vs clean factual line;
-(c) confirmed both indicators. Build order: bot-side stage handler first (safe, no Pine), then Pine alerts.
+**DECISIONS — CONFIRMED by Michael:** broadcast **sweep / armed / fired / invalidated**; **clean factual
+lines** (no Claude narration per stage); both indicators; bot-side first.
+**✅ BOT SIDE DONE & DEPLOYED (commit 71282e0):** `webhook_handler.handle_stage()` routes `event:"stage"`
+→ posts clean lines (🌊 sweep / 🔔 armed / ❌ invalidated) to Telegram, 90s dedupe per (symbol,stage,
+session), ignores non-broadcast stages; `fired` still uses the normal execution path. Tested (format +
+dedupe + ignore). `/help` command also done & deployed.
+**PINE SIDE — sweep DONE (in the Downloads files), armed/invalidated REMAINING:**
+- ✅ **`sweep` alert added** to `~/Downloads/wise_london_v1.pine` (lines ~1132 long / ~1162 short) AND
+  `~/Downloads/wise_ny_v.2.pine` (lines ~1057 long / ~1087 short). Additive only — inserted right after
+  `sweptLong/Short := true`, gated by `enableJsonAlerts`, fires once per sweep. Emits
+  `{"secret":webhookSecret,"event":"stage","stage":"sweep","symbol":syminfo.ticker,"session":sessionName,
+  "detail":"<src> swept (long|short setup)","trade":""}`. **✅ COMPILED CLEAN in TradingView (Michael,
+  2026-06-02) — sweep stage is LIVE end-to-end** (flows through the existing "Any alert() function call"
+  config → bot → Telegram "🌊 setup forming").
+- ⬜ **`armed`** (engulf forming / setup ready to fire) and ⬜ **`invalidated`** (session end / opposite
+  sweep / no engulf) NOT added yet — these need careful tracing of each indicator's fire/invalidation state
+  machine (fire vars: `fireLong1st/2nd`, `fireShort1st/2nd`, `fireT2Long/Short`; London fire alerts ~L2940-
+  2952). Do as a focused indicator session with TradingView compile-check. Hook `armed` just before the
+  fire condition; `invalidated` at session-end without fire / opposite sweep. Same JSON, stage=armed|
+  invalidated. The bot already handles all three stages.
 
 ### 💡 Live setup play-by-play (Michael's idea — confirm before build)
 Michael wants real-time updates as a setup FORMS: "Asia sweep occurred", "displacement confirmed",
@@ -510,6 +527,42 @@ GAP SUMMARY: the engine (execution, BE, expiry, grades, safety, brain) is BUILT 
 missing ~80% of the *product* is the **multi-tenant layer**: fan-out, per-user broker+settings+state+
 dashboard, billing, Postgres, bilingual coach, security/legal. Recommended order: Postgres → per-user
 auth/settings/dashboard → per-user broker connect → signal fan-out → bilingual coach → billing → legal.
+
+### 🔬 COMPETITIVE RESEARCH + "what to build to be better" (researched 2026-06, for Cursor)
+Researched successful bots: **3Commas, Cryptohopper, Zenbot** (crypto) + **Duplikium, Local Trade Copier,
+Copygram, XAUBOT, Odin, AquaFunded** (forex/MT5/prop).
+**Common winning features across ALL successful bots:**
+1. **Verifiable backtesting + track record** (Zenbot/3Commas/Cryptohopper all have it) = the #1 trust
+   builder. ← WiseMind's BIGGEST GAP. Can't sell without provable performance.
+2. **Marketplace / copy-trading / follow-top-traders** (Cryptohopper) = community + monetization.
+3. **Great UX + easy onboarding** (Cryptohopper 9/10) = adoption.
+4. **Per-account risk config + trade filtering + blacklist/whitelist** (Duplikium) = multi-account.
+5. **Prop-firm compliance + drawdown limiting + "copy as manual" option** (XAUBOT, copiers) = the funded
+   niche. Copygram has 30k prop users.
+6. **Multi-platform** (MT4/MT5/cTrader/DXTrade); **AI strategy backtest+rating** (Cryptohopper/3Commas).
+**What WiseMind ALREADY has that wins:** Telegram integration, MetaAPI multi-broker, real risk mgmt
+(1/day, grade filter, BE, expiry, −2% daily loss), and the **AI COACH/BRAIN (unique — no major bot has a
+real mentor AI that learns + briefs + answers).**
+**HOW WISEMIND BEATS THEM (the moat + the gaps to close):**
+- 🥇 **Lean into the AI brain — it's the differentiator.** None of 3Commas/Cryptohopper/Zenbot/XAUBOT have
+  a true reasoning mentor that learns from your trades, briefs you, and coaches discipline. Deepen it
+  (reasoning-per-trade, thinking agent). THIS is the moat — market it as "the bot with a brain/coach."
+- 🥇 **Discipline enforcement (anti-overtrading).** Rivals push DCA/grid/martingale = gambling (prop firms
+  BAN these). WiseMind ENFORCES 1/day + A+ grades + prop rules. Position as "the disciplined prop bot."
+- 🥇 **Bot + education + community** (the 500-student plan) — Cryptohopper has a marketplace; WiseMind has
+  mentorship. Combining execution + AI coaching + education is unique.
+- ⬜ **BUILD: verifiable track record / backtest + live-results page** (the #1 missing trust asset — every
+  rival has it; the 2-year stats site idea). HIGHEST-PRIORITY product gap.
+- ⬜ **BUILD: SaaS multi-tenant + onboarding UX** (Cryptohopper's strength) — per-user dashboards (already
+  wanted), easy broker connect.
+- ⬜ **BUILD: prop-firm compliance pack** — drawdown limiting (have −2% daily; add max-DD + per-firm
+  presets), optional "looks-manual" execution, set files per prop firm.
+- ⬜ **OPTIONAL: multi-account copier** (Duplikium/Copygram model) for users with several funded accounts.
+**Honest lesson from Zenbot's decline:** it died from "low frequency + slow updates." → Keep WiseMind
+actively maintained + responsive; never let it go stale.
+**RECOMMENDED next priorities (intelligent order):** (1) verifiable track record/backtest page (trust);
+(2) deepen the AI brain / thinking agent (moat); (3) SaaS multi-tenant + per-user dashboards (sell);
+(4) prop-firm compliance pack; (5) marketplace/copy + multi-account (scale).
 
 ### Product / Sellability roadmap (the "sell the bot + indicator" vision)
 Aligns with Michael's existing **500-student release gameplan** (see memory + WiseMindBrain MASTER).
