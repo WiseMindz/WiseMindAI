@@ -39,6 +39,8 @@ from config import (
     MAX_DAILY_LOSS_PCT,
     MAX_TOTAL_DD_PCT,
     ERROR_ALERTS,
+    EXECUTE_ONLY_5M,
+    MAX_LOT_SIZE,
 )
 from database import save_trade, save_message
 from signal_utils import evaluate_signal
@@ -326,6 +328,10 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
             msg += f"🛑 <b>Daily loss limit hit</b> (−{exec_result.get('loss_pct','?')}% ≥ −{exec_result.get('max_loss','?')}%) — <i>trading stopped today</i>\n"
         elif exec_result.get("dd_blocked"):
             msg += f"🛑 <b>MAX DRAWDOWN hit</b> (−{exec_result.get('dd_pct','?')}% ≥ −{exec_result.get('max_dd','?')}%) — <i>bot AUTO-PAUSED, no more trades</i>\n"
+        elif exec_result.get("tf_skipped"):
+            msg += "⏭️ <b>1m fire skipped</b> — <i>5m-only mode (1m SLs are too tight)</i>\n"
+        elif exec_result.get("lot_too_big"):
+            msg += f"⏭️ <b>Lot too big</b> ({exec_result.get('lot','?')} &gt; max {exec_result.get('max_lot','?')}) — <i>skipped for safety</i>\n"
         elif exec_result.get("success") is True:
             entry_px = exec_result.get("entry_price", "")
             order_id = exec_result.get("order_id", "")
@@ -541,6 +547,16 @@ async def receive_webhook(request: Request):
             elif not mt5_executor.should_execute(grade, MT5_MIN_GRADE):
                 exec_result = {"success": None, "skipped": True, "grade": grade, "min_grade": MT5_MIN_GRADE}
                 logger.info(f"⏭️  MT5 skipped — grade {grade} < min {MT5_MIN_GRADE}")
+
+            elif EXECUTE_ONLY_5M and ("1m" in str(data.get("tf_type", "")).lower()
+                                       or "1m" in str(data.get("tf", "")).lower()):
+                exec_result = {"success": None, "tf_skipped": True}
+                logger.info(f"⏭️  MT5 skipped — 1m precision fire (5m-only mode) {data['symbol']}")
+
+            elif MAX_LOT_SIZE > 0 and lot_calc["lot"] > MAX_LOT_SIZE:
+                exec_result = {"success": None, "lot_too_big": True,
+                               "lot": lot_calc["lot"], "max_lot": MAX_LOT_SIZE}
+                logger.warning(f"⏭️  MT5 skipped — lot {lot_calc['lot']} > max {MAX_LOT_SIZE} ({data['symbol']})")
 
             else:
                 # Hold the lock across check→execute→record so two near-simultaneous

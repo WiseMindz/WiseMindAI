@@ -55,6 +55,11 @@ MT5_DRY_RUN = os.getenv("MT5_DRY_RUN", "true").lower() == "true"
 # Minimum signal grade to execute: "A+" = only A+, "B" = A+ and B, "C" = all
 MT5_MIN_GRADE = os.getenv("MT5_MIN_GRADE", "B")
 
+# Only execute 5m structure entries — skip 1m precision fires (tiny SL → oversized lot).
+EXECUTE_ONLY_5M = os.getenv("EXECUTE_ONLY_5M", "true").lower() == "true"
+# Hard cap on lot size — skip any order bigger than this (prevents "not enough money").
+MAX_LOT_SIZE    = float(os.getenv("MAX_LOT_SIZE", "5.0"))   # 0 = no cap
+
 # ── Breakeven monitor (replicates Pine "Auto Move SL to Breakeven") ───────────
 # When an open position reaches BE_TRIGGER_R profit, its SL is moved to entry.
 BE_ENABLED      = os.getenv("BE_ENABLED", "true").lower() == "true"

@@ -564,6 +564,41 @@ dedupe + ignore). `/help` command also done & deployed.
   fire condition; `invalidated` at session-end without fire / opposite sweep. Same JSON, stage=armed|
   invalidated. The bot already handles all three stages.
 
+### 🎛️ NY PINE — work in progress (from Michael's 7 Settings screenshots, 2026-06)
+**✅ DONE — sweep + armed alerts on BOTH `~/Downloads/wise_ny_v.2.pine` AND `~/Downloads/wise_london_v1.pine`:**
+- NY armed (lines ~2381-2384): `nyLongEngulfState/nyShortEngulfState == 2` → fires once on transition.
+- London armed (after `any1mFire`, ~L2943): `longEngulfState/shortEngulfState == 2` → fires once on transition.
+- Both emit `event:"stage",stage:"armed"`. Quotes balanced, additive (no logic touched). Compile-check
+  pending (Michael compiles each). This gives the agreed **3-phase flow: 🌊 sweep → 🔔 armed → ✅ fired** on
+  BOTH indicators. Fixes "armed not in Telegram". Bot already handles sweep/armed/fired.
+**⬜ STILL TO DO on the NY Pine (focused session, compile-check each — life-work, no offline compile):**
+1. **`invalidated` stage alert** — fire when an armed/active NY setup dies (session end without fire, opposite
+   sweep). Hook near where setup state resets.
+2. **Make Michael's CURRENT NY settings the DEFAULTS** (profile override = Custom, so these manual values
+   are authoritative). Update each `input.*` default in wise_ny_v.2.pine to:
+   - Auto-detect profile ON; override = Custom. Logic TF **15m**; 1m Precision Fire ON, **Variant 2**;
+     1m T1 body **0.7**, 1m T2 body **0.8**, 1m SL = Smart chain, 1m Vol Confirm = Off.
+   - Sessions: Asia **19:00-23:00**, London **03:00-05:00**, NY Killzone **08:15-11:00**. Show Asia/London/NY ON.
+   - T2: enable ON, max 1 T2/side/session ON, body **0.85**, displacement **1.25**, NY retrace-inside-ref ON,
+     min RR **2**, max RR **5**. Bias filter T1+T2 ON.
+   - NY engine ON; sweep targets = Model; max NY signals **1**; block NY if London>ticks ON, max London **500**;
+     NY T1 body **0.85**, NY T2 body **0.85**; NY Entry Mode = Auto; manip wick **0.2**; auto Asia thr **1.5**;
+     accepts AH/AL/LH/LL/PNYH/PNYL all ON; show [NY] labels ON; show manip boxes ON.
+   - Sweep: Asia/London/PDH-PDL/PWH-PWL all ON; max bars after Asia **50**; close-back ON; show lines ON;
+     Asia color red, London color blue. PD touch within **15** bars; max PD zones **5**; NY accept 15m+30m FVG ON.
+   - Strong engulf: min body **0.8**; require-formal OFF. Low-vol filter ON: candle **0.4**, avg body **0.3**,
+     vol ratio **0.7**. Vol confirm: require spike ON, override mult ON × **1.25**.
+   - Asia range: max **1.5**; block-if-huge ON, huge **12**; hard-cap ON, max ticks **500**.
+   - TP engine: min RR **2.5**, max RR **4**, TP buffer **0**.
+   - HTF align = Off, score threshold **25**; Your Bias = Auto. FVG: show ON, auto-delete ON, min size **4**,
+     max active **4**, 5m ON, 15m OFF, 30m OFF. OB: show ON, min disp **1**, max active **3**.
+   - HTF Bias1 **15m**, HTF Bias2 **1H**, trend lookback **50**. SL buffer **15**, swing lookback **16**,
+     min dist **0.4**, engulf-first OFF, show SL source ON, show SL/TP boxes ON. Daily/Weekly liquidity: last
+     **1** day; Daily High/Low lines OFF, PWH/PWL OFF.
+3. **NY live-box upgrade** — add London's "Signal Quality" block (Vol Strength, Engulf Body, Displacement,
+   FVG Zone, HTF OB) + "Risk Gates" block, personalized for NY (NY sweep/PO3/Prev-NY). NY dashboard code ~L2300+.
+NOTE: same screenshots can also set London defaults if Michael wants parity later.
+
 ### 💡 Live setup play-by-play (Michael's idea — confirm before build)
 Michael wants real-time updates as a setup FORMS: "Asia sweep occurred", "displacement confirmed",
 "price tapped PD zone", "engulf forming — trade about to fire", "criterion X hit". HOW it works (honest):
@@ -576,6 +611,17 @@ Premium=400) — stage alerts × assets add up; (3) bot: handle a `stage`/`event
 format/narrate. Great for engagement + (in SaaS) broadcast to all users. Status: idea logged, awaiting go.
 NOTE: live `/status` + `/brief` verified working on Railway 2026-06-02 (brief rendered in English). Minor:
 `/help` command listing all commands not built yet (Michael tried /commands).
+
+### ⚠️ GAP: expiry-closed trades not recorded in /stats (Michael asked 2026-06)
+The bot's 24h expiry (`_check_expiry_once`) closes the position at MARKET (live price at the 24h mark, not
+a fixed price) and only LOGS it ("force-closed at market") — it does NOT classify the trade WIN/LOSS/BE or
+write it to the `trade_results` journal. /stats outcomes come only from Pine's `event:"trade_result"`
+webhook (`handle_trade_result`, routed at webhook L480). The bot does NOT route Pine's `event:"trade_expiry"`
+(only `trade_result` + `stage`). → Expiry trades are closed correctly on the broker but their OUTCOME is
+missing from /stats. FIX: (a) on bot expiry-close, read realized P&L from MetaAPI → record to trade_results
+(WIN/LOSS/BE + achieved R); (b) route `event:"trade_expiry"` in the webhook → save_trade_result. Same gap
+applies to BE-closed and SL/TP closes the bot didn't originate — long-term, reconcile broker deal history →
+journal so /stats reflects EVERY close, not just Pine-reported ones.
 
 ### Proposed directions (discussed, awaiting Michael's go — do NOT build yet)
 - **Learning feedback loop (RECOMMENDED form of "make it learn").** Record every executed trade with full
