@@ -354,9 +354,15 @@ blackout) + HQ execution merge.**
 - A3 Safety hardening (before real money): daily-loss baseline = broker server-midnight balance (not lazy
   first-seen); max TOTAL drawdown limit + per-firm presets; news blackout window; per-asset + global kill
   switch. _done = each limit blocks at the exact threshold, sticky, survives restart._
-- A4 Automated test harness — THE no-bug guarantee: unit tests (scoring, lot calc, every gate, stage
-  dedupe); dry-run replay of historical signals → assert expected actions; GitHub Actions CI on push.
-  _done = green CI required to deploy; coverage on all money-touching logic._
+- A4 ✅ **SHIPPED (2026-06-03)** — Automated test harness, THE no-bug guarantee. `tests/` with **35 tests
+  all green** covering the money-touching logic: signal scoring + 4-tier grade (`test_signal_scoring.py`),
+  lot-size calc + pip helpers + broker-suffix (`test_lot_size.py`), every safety gate — grade filter /
+  daily cap / kill switch / daily-loss threshold+sticky (`test_gates.py`), and stage-alert routing +
+  secret + dedupe (`test_stage_alerts.py`). `conftest.py` forces hermetic SAFE dummy env (never loads the
+  real Telegram/Claude keys or touches real state files), `pytest.ini` (asyncio_mode=auto), dev deps in
+  `requirements-dev.txt` (pytest, pytest-asyncio). **GitHub Actions CI** (`.github/workflows/ci.yml`) runs
+  `pytest` on every push/PR to main. Run locally: `./venv/bin/python -m pytest`.
+  _Remaining for full A4: dry-run replay of historical signals → expected actions (add as history grows)._
 
 **PHASE B — PROOF & TRUST** (the #1 release gate — cannot sell without provable performance)
 - B1 bot POSTs `execution`/`be_moved`/`position_closed` → HQ. B2 HQ stores (executions table) + real ledger.
@@ -390,9 +396,10 @@ blackout) + HQ execution merge.**
   (TradingView invite-only tied to subscription). F7 load test + backups + disaster recovery.
   _done = a non-technical stranger onboards alone and trades safely; nothing breaks._
 
-**▶ BUILD NEXT (top of tree):** (1) A2 finish Pine `armed`/`invalidated` (⅓ in, high impact/low risk);
-(2) A4 automated test harness (the mechanism that DELIVERS "no bugs"); (3) B1–B4 track record (gate to
-selling). Then C+D in parallel, then E, then F.
+**▶ BUILD NEXT (top of tree):** ~~A4 automated test harness~~ ✅ DONE (35 tests + CI, 2026-06-03).
+Now: (1) A2 finish Pine `armed`/`invalidated` (⅓ in, high impact/low risk — needs TradingView push);
+(2) B1–B4 track record (gate to selling); (3) A1/A3 reliability + safety hardening (add tests as built).
+Then C+D in parallel, then E, then F.
 
 ## 5B. WISEMIND HQ INTEGRATION + PRODUCT / SELLABILITY ROADMAP (vision — keep current)
 
