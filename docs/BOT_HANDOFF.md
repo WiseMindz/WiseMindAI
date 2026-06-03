@@ -337,6 +337,63 @@ trades.db`, `DAILY_STATE_PATH=/data/daily_trades.json` (+ Phase 0: ADMIN_USER_ID
 ERROR_ALERTS). Briefings default ON. **Next unbuilt: Phase 2 execution polish (trailing/partial TP, news
 blackout) + HQ execution merge.**
 
+## 5D. 🌳 RELEASE ROADMAP — the tree to a perfect public launch (keep current)
+> Michael's bar (2026-06-03): "clean, perfect, intelligent, magnificent, inspirational, impactful bot +
+> dashboard — NO bugs, no features that don't work." A feature is **DONE only when**: it has a test, it's
+> verified on demo end-to-end, it fails safe (errors NEVER trade), it's documented here, and a fresh user
+> could use it with no explanation. Critical path: **A → B → C/D (parallel) → E → F.**
+
+**PHASE A — HARDEN THE ENGINE** (make what exists unbreakable before adding anything new)
+- A1 Execution reliability: fill `entry_price` from broker after open (kill the 0 bug); broker
+  symbol-suffix map (EURUSD vs EURUSD.r); MetaAPI reconnect/retry on drop; signal idempotency (never
+  double-execute the same alert); read-back confirm SL+TP actually set after open.
+  _done = open/modify/close proven on demo across reconnects, zero double-fires._
+- A2 Pine↔bot parity: Pine SENDS `be_trigger_r`+`expiry_hours` in London+NY alert JSON (Part 2);
+  Pine `armed` stage alert (engulf forming); Pine `invalidated` stage alert (session end / opposite sweep /
+  no engulf). _done = each compiles clean + verified end-to-end to Telegram._ (sweep already live.)
+- A3 Safety hardening (before real money): daily-loss baseline = broker server-midnight balance (not lazy
+  first-seen); max TOTAL drawdown limit + per-firm presets; news blackout window; per-asset + global kill
+  switch. _done = each limit blocks at the exact threshold, sticky, survives restart._
+- A4 Automated test harness — THE no-bug guarantee: unit tests (scoring, lot calc, every gate, stage
+  dedupe); dry-run replay of historical signals → assert expected actions; GitHub Actions CI on push.
+  _done = green CI required to deploy; coverage on all money-touching logic._
+
+**PHASE B — PROOF & TRUST** (the #1 release gate — cannot sell without provable performance)
+- B1 bot POSTs `execution`/`be_moved`/`position_closed` → HQ. B2 HQ stores (executions table) + real ledger.
+- B3 Track-record engine: equity curve, win-rate by grade/session/asset, expectancy, profit factor, max DD,
+  avg R — with honest sample-size labels. B4 public, auto-updating, verifiable results page (demo→funded).
+  B5 published Pine backtest with methodology. _done = a stranger trusts the numbers; no cherry-picking._
+
+**PHASE C — THE BRAIN (the moat — what no competitor has)**
+- C1 reasoning-per-trade logged + shown ("why A+", "why skipped"). C2 thinking mentor agent (pattern
+  detection over time). C3 proactive insights (not just on-demand). C4 bilingual coach (SV/EN). C5 weekly
+  self-review of the bot's own decisions (advisory; Michael approves changes).
+  _done = feels like a real mentor; every claim traces to real data._
+
+**PHASE D — THE DASHBOARD (beautiful + functional; parallel to C)**
+- D1 design system (clean/modern/inspirational, dark mode, responsive). D2 live feed (signal→exec→BE→close,
+  SSE). D3 personal views (equity/stats/journal/history). D4 settings UI (risk%/assets/min-grade/BE/expiry/
+  caps, validated). D5 the 3D brain/cortex tie-in as the signature "wow".
+  _done = premium look, every control works, no dead links, mobile-clean._
+
+**PHASE E — MULTI-TENANT SaaS (product for many)**
+- E1 Postgres migration. E2 per-user auth + hard isolation. E3 per-user broker connect (MetaAPI
+  provisioning). E4 per-user settings+state in DB. E5 signal fan-out engine (central signal → all
+  subscribers, each sized/filtered). E6 billing (Stripe; covers ~$9/mo/account). E7 admin tooling
+  (all-users view, global+per-user kill switch, broadcasts).
+  _done = two users fully isolated; one broker error never touches another._
+
+**PHASE F — LAUNCH HARDENING (release to the world)**
+- F1 security (encrypt broker creds, 2FA, password reset). F2 legal (ToS, risk disclaimers, privacy, GDPR,
+  regulatory review). F3 monitoring/alerting + error tracking + uptime. F4 onboarding flow (signup→connect
+  broker→prefs→go live). F5 closed beta with real users → fix EVERYTHING. F6 indicator licensing
+  (TradingView invite-only tied to subscription). F7 load test + backups + disaster recovery.
+  _done = a non-technical stranger onboards alone and trades safely; nothing breaks._
+
+**▶ BUILD NEXT (top of tree):** (1) A2 finish Pine `armed`/`invalidated` (⅓ in, high impact/low risk);
+(2) A4 automated test harness (the mechanism that DELIVERS "no bugs"); (3) B1–B4 track record (gate to
+selling). Then C+D in parallel, then E, then F.
+
 ## 5B. WISEMIND HQ INTEGRATION + PRODUCT / SELLABILITY ROADMAP (vision — keep current)
 
 ### WiseMind HQ — how it connects today
