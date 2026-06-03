@@ -20,6 +20,14 @@ session** and **update it at the end of every work slice**. If this file and you
 ---
 
 ## 1. Hard rules (NON-NEGOTIABLE — both tools obey)
+- **🔴 NEVER place test/manual trades on the FUNDINGTRADERS challenge account (Michael's explicit order,
+  2026-06).** No `execute_trade`/`create_*_order`/open-position scripts against it — not even "to verify."
+  The bot may only trade REAL A+ signals from the indicators once live. Verify via read-only/dashboard only.
+- **Stage 2 IN PROGRESS:** FundingTraders MetaAPI account created — ID `a922247c-519d-4a42-a4af-9c3cfe22a4d9`,
+  MT5-95392 "FundingTraders-Bot", `FundingTradersGroup-Server`, high reliability, **Connected + Deployed**.
+  Switch the bot by setting Railway `METAAPI_ACCOUNT_ID=a922247c-…`, `ACCOUNT_BALANCE=50000`,
+  `MT5_MIN_GRADE=A+`. Old demo (`bd1c91cb…`, ICMarketsEU-Demo) still deployed — UNDEPLOY it after the switch
+  is verified to avoid double MetaAPI billing.
 - **CONFIRM BEFORE CHANGES.** Michael's standing rule: *"always confirm with me so you understand"* and
   *"be as precise as possible, don't make mistakes — this is my life work."* Plan → yes → then edit.
 - **NEVER auto-trade without an explicit go.** Default `.env` state is **safe**:
@@ -296,6 +304,26 @@ user's local MT5 app is **NOT** in the trade path — it's only a viewing window
    (not just signals). See §5B. ⚠️ HQ is live on Railway — confirm before editing it.
 
 ---
+
+## 5E. 🔀 MULTI-ACCOUNT FAN-OUT — BUILD SPEC (in progress; SAFE/opt-in/off by default)
+Michael wants the bot to trade BOTH IC demo + FundingTraders from one signal (only EURUSD alerts on TV).
+**HARD SAFETY:** additive + OPT-IN. Default stays single-account (`METAAPI_ACCOUNT_ID`); multi-account only
+activates when `METAAPI_ACCOUNT_IDS` is set. Never leave a half-built multi path that could mis-execute the
+CHALLENGE. Keep `MAX_TRADES_PER_DAY=1`, `MT5_MIN_GRADE=A+` for the challenge.
+**Design:**
+- Config `METAAPI_ACCOUNT_IDS="a922247c-…,bd1c91cb-…"` (challenge first). If empty → legacy single-account.
+- `mt5_executor`: refactor `_connection` → `_connections: {account_id: conn}`; `init_connection` connects
+  ALL ids; `execute_trade` loops accounts; `get_open_positions`/monitor operate per account.
+- **Per-account lot sizing (CRITICAL):** fetch EACH account's live balance/equity at execute time and size
+  1% off THAT (challenge $50k → $500 risk; demo $100k → $1000). Never share one ACCOUNT_BALANCE across
+  accounts. (Contract size 100k is the same instrument property — irrelevant; BALANCE is what differs.)
+- **Per-account state:** daily cap / daily loss / max-DD keyed by account_id (challenge guards independent
+  of demo). Position monitor (BE/expiry) loops every account's positions + registers per-position settings
+  per account.
+- Telegram exec line shows WHICH account each fill hit.
+- Tests: per-account sizing, fan-out to N accounts, one account failing doesn't block others.
+STATUS: spec logged; building additive core (off by default). Max-DD guard (5A note) also mid-wire (config+
+safety added, inert) — finish it per-account as part of this.
 
 ## 5A. ✅ PHASE 0 SAFETY — BUILT & TESTED (code done; deploy steps below)
 Params: `ADMIN_USER_ID=5082485728`, `MAX_DAILY_LOSS_PCT=2`, `ERROR_ALERTS=true`,

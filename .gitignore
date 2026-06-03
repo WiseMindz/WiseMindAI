@@ -38,3 +38,4 @@ ngrok.zip
 # Bot runtime state
 daily_trades.json
 uploads/
+.github/

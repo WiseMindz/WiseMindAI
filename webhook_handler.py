@@ -37,6 +37,7 @@ from config import (
     MAX_TRADES_PER_DAY,
     DAY_RESET_TZ,
     MAX_DAILY_LOSS_PCT,
+    MAX_TOTAL_DD_PCT,
     ERROR_ALERTS,
 )
 from database import save_trade, save_message
@@ -323,6 +324,8 @@ def format_telegram_message(data: dict, lot_calc: dict, tp_profit: float, evalua
             msg += "⏸ <b>Bot PAUSED</b> — <i>signal logged, NOT traded</i>\n"
         elif exec_result.get("loss_blocked"):
             msg += f"🛑 <b>Daily loss limit hit</b> (−{exec_result.get('loss_pct','?')}% ≥ −{exec_result.get('max_loss','?')}%) — <i>trading stopped today</i>\n"
+        elif exec_result.get("dd_blocked"):
+            msg += f"🛑 <b>MAX DRAWDOWN hit</b> (−{exec_result.get('dd_pct','?')}% ≥ −{exec_result.get('max_dd','?')}%) — <i>bot AUTO-PAUSED, no more trades</i>\n"
         elif exec_result.get("success") is True:
             entry_px = exec_result.get("entry_price", "")
             order_id = exec_result.get("order_id", "")
@@ -544,17 +547,25 @@ async def receive_webhook(request: Request):
                 # signals can never both slip past the daily cap.
                 async with daily_limit.LOCK:
                     used = daily_limit.count_today(DAY_RESET_TZ)
-                    # ── Daily loss limit ──────────────────────────────────────
+                    # ── Daily loss limit + max total drawdown (one equity fetch) ──
                     loss = {"blocked": False, "loss_pct": 0.0}
-                    if MAX_DAILY_LOSS_PCT > 0:
+                    dd   = {"blocked": False, "dd_pct": 0.0}
+                    if MAX_DAILY_LOSS_PCT > 0 or MAX_TOTAL_DD_PCT > 0:
                         equity = await mt5_executor.get_account_equity()
                         if equity is not None:
-                            loss = safety.check_daily_loss(equity, MAX_DAILY_LOSS_PCT, DAY_RESET_TZ)
+                            if MAX_DAILY_LOSS_PCT > 0:
+                                loss = safety.check_daily_loss(equity, MAX_DAILY_LOSS_PCT, DAY_RESET_TZ)
+                            if MAX_TOTAL_DD_PCT > 0:
+                                dd = safety.check_total_drawdown(equity, ACCOUNT_BALANCE, MAX_TOTAL_DD_PCT)
 
                     if used >= MAX_TRADES_PER_DAY:
                         exec_result = {"success": None, "daily_limit": True,
                                        "used": used, "max": MAX_TRADES_PER_DAY}
                         logger.info(f"⛔ Daily cap reached ({used}/{MAX_TRADES_PER_DAY}) — signal NOT traded")
+                    elif dd["blocked"]:
+                        exec_result = {"success": None, "dd_blocked": True,
+                                       "dd_pct": round(dd["dd_pct"], 2), "max_dd": MAX_TOTAL_DD_PCT}
+                        logger.warning(f"🛑 MAX DRAWDOWN (-{dd['dd_pct']:.2f}% ≥ -{MAX_TOTAL_DD_PCT}%) — bot auto-paused, signal NOT traded")
                     elif loss["blocked"]:
                         exec_result = {"success": None, "loss_blocked": True,
                                        "loss_pct": round(loss["loss_pct"], 2), "max_loss": MAX_DAILY_LOSS_PCT}

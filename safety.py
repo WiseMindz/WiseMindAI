@@ -111,6 +111,36 @@ def check_daily_loss(current_equity: float, max_loss_pct: float, tz_name: str) -
     return {"blocked": False, "loss_pct": loss_pct, "start_equity": start}
 
 
+def check_total_drawdown(current_equity: float, start_balance: float, max_dd_pct: float) -> dict:
+    """
+    Max TOTAL drawdown guard (vs the challenge start balance). When equity drops
+    >= max_dd_pct below start_balance, set a STICKY block + auto-pause the bot.
+    Returns {"blocked": bool, "dd_pct": float}. max_dd_pct = 0 disables.
+    """
+    if max_dd_pct <= 0 or not start_balance or start_balance <= 0:
+        return {"blocked": False, "dd_pct": 0.0}
+
+    dd_pct = max(0.0, (start_balance - current_equity) / start_balance * 100.0)
+    state = _load()
+
+    if state.get("dd_blocked"):
+        return {"blocked": True, "dd_pct": dd_pct}
+
+    if dd_pct >= max_dd_pct:
+        state["dd_blocked"] = True
+        state["paused"] = True          # auto-pause so NO new trades fire
+        _save(state)
+        logger.warning(f"🛑 MAX DRAWDOWN hit: -{dd_pct:.2f}% (start {start_balance}) — bot AUTO-PAUSED")
+        return {"blocked": True, "dd_pct": dd_pct}
+
+    return {"blocked": False, "dd_pct": dd_pct}
+
+
+def dd_status() -> dict:
+    s = _load()
+    return {"blocked": bool(s.get("dd_blocked", False))}
+
+
 def loss_status(tz_name: str) -> dict:
     """Read-only snapshot for /status (does not record a baseline)."""
     state = _load()

@@ -392,7 +392,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 import safety as _safety
 import daily_limit as _daily_limit
 import mt5_executor as _mt5
-from config import ADMIN_USER_ID, MAX_DAILY_LOSS_PCT, DAY_RESET_TZ, MAX_TRADES_PER_DAY
+from config import ADMIN_USER_ID, MAX_DAILY_LOSS_PCT, MAX_TOTAL_DD_PCT, DAY_RESET_TZ, MAX_TRADES_PER_DAY
 
 
 def _is_admin(update: Update) -> bool:
@@ -432,6 +432,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Trades today: {used}/{MAX_TRADES_PER_DAY}",
         f"Daily loss limit: {'-' + str(MAX_DAILY_LOSS_PCT) + '%' if MAX_DAILY_LOSS_PCT > 0 else 'off'}"
         + (" 🛑 HIT" if ls.get("blocked") else ""),
+        f"Max drawdown: {'-' + str(MAX_TOTAL_DD_PCT) + '%' if MAX_TOTAL_DD_PCT > 0 else 'off'}"
+        + (" 🛑 HIT" if _safety.dd_status().get("blocked") else ""),
     ]
     if equity is not None:
         lines.append(f"Equity: {equity}")

@@ -73,6 +73,10 @@ DAY_RESET_TZ       = os.getenv("DAY_RESET_TZ", "Europe/Stockholm")  # CEST day b
 # ── Phase 0 Safety: kill switch, daily loss limit, error alerts ────────────────
 ADMIN_USER_ID      = get_int_env("ADMIN_USER_ID", default=0)        # Telegram user allowed to /pause /resume (0 = anyone)
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0"))    # auto-stop at -X% equity for the day (0 = off)
+# Max TOTAL drawdown from the challenge start balance (ACCOUNT_BALANCE). Blocks new
+# trades + auto-pauses when equity drops this % below start. Keep UNDER the prop firm's
+# max-DD rule (e.g. 8 when FundingTraders allows ~10%). 0 = off.
+MAX_TOTAL_DD_PCT   = float(os.getenv("MAX_TOTAL_DD_PCT", "0"))
 ERROR_ALERTS       = os.getenv("ERROR_ALERTS", "true").lower() == "true"  # Telegram ping on failed order / disconnect
 
 # ── Phase 1 Brain: daily briefings ─────────────────────────────────────────────
