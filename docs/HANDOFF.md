@@ -106,6 +106,18 @@ already isolates symbols (EUR preset vs XAU preset are independent constants; Cu
 by design). EUR preset constants + Michael's Custom manual inputs: 0 changes. **Verify:** structural checks
 pass (no bare `slBuffer`/`minFvgSizeTicks` left in logic, scope/order OK, gold caps=6000). **NOT compiled** —
 Michael compiles next; if clean, v4 becomes the live NY indicator (EURUSD=Custom, gold=Force XAUUSD).
+**v4 is the TEST pine** (Michael's call 2026-06-04). **2 more defaults baked from his panel:** `enableBEMove`
+true→**false** (Auto-BE off — indicator-only, BOT still does real BE @2R; makes perf table raw W/L);
+`htfAlignMode` "Off"→**"30m OR 4H must agree"** (real filter, cuts signals on EUR+gold). **GOLD UNDERPERF
+INVESTIGATION (briefed, fixes NOT yet built — awaiting Michael's go):** gold tables ~bad (Apr 0W/3L, May
+1W/2L, Jun 0W/1L) vs EUR strong (+16R, +8.9R). Root causes IDENTIFIED in code: (1) 🔴 **displacement
+double-count** — `t2DisplaceAtrBuy = t2DisplaceAtr(XAU 1.50) × goldBoost(1.3) = 1.95×ATR`; short =
+×1.40 sell-boost too = **2.73×ATR** vs EUR 1.25/1.75. Gold already raised in the preset, then `goldBoost`
+raises it AGAIN → gold T2 rare + enters at exhaustion → losses. Proposed fix A: **Gold Displacement Boost
+1.3→1.0** (test alone first). (2) 🟠 HTF filter now ON + gold's laggy/news-whipsawed 4H bias → forces
+counter-trend (e.g. shorts-only on a rising day). Proposed fix B: gold-aware HTF (4H-only/Off on XAU).
+(3) structural: NY killzone 0830-1100 ET = US-news whipsaw window for gold; spread not in backtest; ~9-trade
+sample = high variance. Plan: test fix A in isolation first.
 
 ### `wise_ny_v3.pine` — **Wise NY v3.0** (2026-06-04) — superseded by v4 (kept as backup)
 Fresh copy of `~/Downloads/wise_ny_v.2.pine` → **`~/Downloads/wise_ny_v3.pine`** (v2 left 100% untouched as
