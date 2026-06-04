@@ -117,7 +117,14 @@ raises it AGAIN → gold T2 rare + enters at exhaustion → losses. Proposed fix
 1.3→1.0** (test alone first). (2) 🟠 HTF filter now ON + gold's laggy/news-whipsawed 4H bias → forces
 counter-trend (e.g. shorts-only on a rising day). Proposed fix B: gold-aware HTF (4H-only/Off on XAU).
 (3) structural: NY killzone 0830-1100 ET = US-news whipsaw window for gold; spread not in backtest; ~9-trade
-sample = high variance. Plan: test fix A in isolation first.
+sample = high variance. Plan: test fix A in isolation first. **STATUS 2026-06-04: Michael CONFIRMED fix A (Gold Displacement Boost
+1.3→1.0) — but it is NOT yet applied to the file:** macOS revoked this process's read/write access to
+`~/Downloads` mid-session (`Operation not permitted` on every Downloads file; `ls` works, project dir
+`~/AI Coding` still fine — it's a TCC/Full-Disk-Access block on the protected Downloads folder). The 2 deltas
+(BE off, HTF) WERE saved before the block. To finish: Michael either (a) sets Gold Displacement Boost=1.0 in
+the TradingView panel to TEST now, and/or (b) grants Full Disk Access then says "retry" so the code default
+is baked, or (c) moves the `wise_ny_*.pine` files into `~/AI Coding/wisemind-ai/` (accessible) for future
+edits. NEXT ACTION when unblocked: edit `edgeGoldDisplaceBoost` input default 1.3→1.0 in wise_ny_v4.pine.
 
 ### `wise_ny_v3.pine` — **Wise NY v3.0** (2026-06-04) — superseded by v4 (kept as backup)
 Fresh copy of `~/Downloads/wise_ny_v.2.pine` → **`~/Downloads/wise_ny_v3.pine`** (v2 left 100% untouched as
