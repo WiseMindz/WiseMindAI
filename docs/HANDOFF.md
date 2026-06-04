@@ -70,7 +70,26 @@ the in-editor compile above.
 **Both indicators are split out of the v9.25 monolith and live on TradingView.** Latest builds compiled
 clean and are saved.
 
-### `wise_london_v1.pine` — **Wise London v1.0** (~3022 lines) — LIVE, compiles clean
+### `wise_london_v2.pine` — **Wise London v2.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
+Fresh copy of `wise_london_v1.pine` → **`~/Downloads/wise_london_v2.pine`** (v1 untouched). Ports ALL the NY
+v3+v4 work to London so both engines are aligned. **9 changes, EURUSD firing logic UNCHANGED** (only display/
+sync/tag + gold + symbol-list touched — what FIRES on EUR is identical). Michael's scope: apply in general
+(esp EUR), **remove GBP/CHF** (mains = EUR + XAU), **gold HTF stays Off**. Done: (1) chart-TF dashboard+alert
+sync (`chartBullBodyPctV2/chartBearBodyPctV2/chartVolMultV2/chartTfStr`; dashboard Vol+Engulf rows + JSON
+`engulf_body_pct`/`vol_spike` repointed); (2) freeze-at-fire toggle `freezeQualityAtFire` (gVis) +
+`showEngPctV2/showVolV2/frozen*`; (3) correct TF tag — 4 hardcoded `1m-V1/V2`→`chartTfStr+"-V1/V2"`, `5m`→
+`chartTfStr`, `tf_type`→`chartTfStr`; (4) **Asia**-sweep break-and-hold toggle `asiaBreakHoldCounts` + new
+`isAsiaSweepHigh/Low` (PD/PW keep strict `isSweepHigh/Low`); (5) gold displacement double-count
+`edgeGoldDisplaceBoost` 1.3→1.0; (6) SL buffer + Min FVG profile-aware (`slBufferEff`/`minFvgTicksEff` +
+`profileSlBuffer`/`profileMinFvgTicks`); (7) vol-override leak closed (`volConfirmMult = useCustom ? manual :
+preset`); (8) gold tuning XAU preset — vol 1.20→1.05, SL 0.50→0.70, Asia cap 4000→6000 (body already 0.80, no
+killzone shift — London session fixed); (9) **GBP/CHF removed** — dropdown options, `isGbp/ChfSymbol`,
+`useGbp/ChfPreset`, all profile ternaries, display/label tags, titleBg → EUR/XAU/Custom only. Verified: scope/
+order OK (drawDashboard def 2765 > freeze 2177), 0 dangling refs, 0 hardcoded 1m. **NOT compiled** — Michael
+compiles next (EUR=Custom or Auto, gold=Force XAUUSD, alert on 5m chart). Mirrors NY v3 patterns that compiled
+clean. Same bot impact as NY: correct TF tag means 5m-chart London fires now tag `5m` → bot executes them.
+
+### `wise_london_v1.pine` — **Wise London v1.0** (~3022 lines) — superseded by v2 (kept as backup)
 London session engine (09:00–11:15 CEST). T1 (immediate reversal) + T2 (AMD retrace), 1 signal/session.
 **Shipped this session:**
 - ✅ **13 "loosening" changes** (fewer blocked trades, T1/T2 no longer fight): `minBodyRatio` 0.90→**0.80**;
