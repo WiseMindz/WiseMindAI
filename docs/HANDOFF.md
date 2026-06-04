@@ -108,6 +108,17 @@ JSON read the **15m logic candle** (`eff*`) → showed 62% while the fire used a
 helpers). **NOT compiled** — Michael compiles on TradingView next. If clean, this supersedes v2 as the live
 NY indicator (alert on 5m chart).
 
+**Defaults baked from Michael's live settings (2026-06-04, read off his TradingView Inputs panel):** 6
+deltas from the v2 code defaults → now v3 ships pre-tuned: `profileOverride` Auto→**Custom (manual values)**;
+`oneMinBodyRatio` (1m T1) 0.80→**0.75**; `t2DisplaceAtrManual` 1.25→**1.5** (his explicit ask — stricter T2);
+`pdTouchWindow` 15→**20**; `volConfirmMultManual` 1.5→**1.25**; `beThresholdR` 1.5→**2.0**. Everything else
+already matched. ⚠️ **BOT SYNC TODO:** the bot does the REAL breakeven (env `BE_TRIGGER_R=1.5`) — to match
+the indicator's new 2R, set **Railway `BE_TRIGGER_R=2.0`**. ⚠️ `profileOverride=Custom` disables EURUSD/XAU
+auto-tuning (uses manual values for ALL symbols) — fine for EURUSD, but gold would use EUR-tuned values.
+**Monthly stats note (briefed):** the indicator perf table recomputes live over LOADED bars only; a 5m chart
+loads ~2-3 months, so older/worse pre-April months only appear when you scroll back. Recent-months-look-great
+= recency/curve-fit yellow flag; weight full history, the bot guards stay on.
+
 ### `wise_ny_v1.pine` — **Wise NY v2.0** (~2611 lines) — LIVE (functional), compiles clean
 NY session engine (08:30–11:00 ET / 14:00–17:00 CEST). Same T1/T2 + 1m fire as London, plus Gold/PO3 work.
 **Shipped this session (the "make Gold work as well as EURUSD" update):**
