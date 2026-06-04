@@ -113,8 +113,8 @@ deltas from the v2 code defaults → now v3 ships pre-tuned: `profileOverride` A
 `oneMinBodyRatio` (1m T1) 0.80→**0.75**; `obMinMoveAtr` (Order-Blocks Min Displacement) 1.0→**1.5** (his ask;
 T2 min displacement stays **1.25** — initially mis-set to 1.5, reverted); `pdTouchWindow` 15→**20**;
 `volConfirmMultManual` 1.5→**1.25**; `beThresholdR` 1.5→**2.0**. Everything else
-already matched. ⚠️ **BOT SYNC TODO:** the bot does the REAL breakeven (env `BE_TRIGGER_R=1.5`) — to match
-the indicator's new 2R, set **Railway `BE_TRIGGER_R=2.0`**. ⚠️ `profileOverride=Custom` disables EURUSD/XAU
+already matched. ✅ **BOT SYNC DONE (2026-06-04):** Michael set Railway **`BE_TRIGGER_R=2.0`** — real-account breakeven now
+matches the indicator's 2R. ⚠️ `profileOverride=Custom` disables EURUSD/XAU
 auto-tuning (uses manual values for ALL symbols) — fine for EURUSD, but gold would use EUR-tuned values.
 **Monthly stats note (briefed):** the indicator perf table recomputes live over LOADED bars only; a 5m chart
 loads ~2-3 months, so older/worse pre-April months only appear when you scroll back. Recent-months-look-great
