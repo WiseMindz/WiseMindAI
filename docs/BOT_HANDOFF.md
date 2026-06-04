@@ -23,12 +23,18 @@ session** and **update it at the end of every work slice**. If this file and you
 - **🔴 NEVER place test/manual trades on the FUNDINGTRADERS challenge account (Michael's explicit order,
   2026-06).** No `execute_trade`/`create_*_order`/open-position scripts against it — not even "to verify."
   The bot may only trade REAL A+ signals from the indicators once live. Verify via read-only/dashboard only.
-- **Stage 2 — PHASE 2 (2026-06-04):** Michael advanced to FundingTraders **PHASE 2**. New MetaAPI account
-  ID `3bd69d88-3055-4d93-b649-450b99c52396`. Switch the bot: Railway `METAAPI_ACCOUNT_ID=3bd69d88-…`,
-  keep `ACCOUNT_BALANCE=50000` (confirm phase-2 size), `MT5_MIN_GRADE=B` (Michael's choice). UNDEPLOY the
-  old phase-1 account (`a922247c-…`) to avoid double billing. NOTE: daily-cap + dd state on the /data volume
-  carry over from phase 1 — reset at CEST midnight, or clear `daily_trades.json`/`bot_state.json` for a
-  fresh start on the new account. (Phase-1 account was `a922247c-…` MT5-95392.)
+- **Stage 2 — PHASE 2 LIVE ✅ (2026-06-04):** Michael advanced to FundingTraders **PHASE 2** and the bot is
+  **CONNECTED + LIVE + RESUMED** on it. **ACTIVE account = `2121b61f-befd-464e-ba96-44a7aba907e3`**
+  (MT5-95927, FTraders-Bot Phase 2, $50,000 USD). Railway is set: `METAAPI_ACCOUNT_ID=2121b61f-…`,
+  `ACCOUNT_BALANCE=50000`, `MT5_MIN_GRADE=B`. `/status` at 10:42 CEST = `State: ▶️ LIVE | MetaAPI: ✅ connected
+  | Trades today: 0/1 | Equity: 50000.0`. History of the account churn: first phase-2 account
+  `3bd69d88-…` read DEPLOYED+CONNECTED in metadata but RPC subscribe kept FAILING with "no accounts deployed
+  yet" (stuck deploy) → Michael created a fresh account `2121b61f-…` which subscribes cleanly (read-only RPC
+  test confirmed balance/equity $50k USD). Fix shipped alongside: **MetaAPI auto-reconnect** (commit
+  53e18c5 — `ensure_connected()` in `mt5_executor.py`, monitor loop reconnects, lifespan starts monitor even
+  if init fails). TODO housekeeping: UNDEPLOY the dead accounts `3bd69d88-…`, phase-1 `a922247c-…` (MT5-95392),
+  and the IC demo to stop ~$9/mo each. NOTE: daily-cap + dd state on the /data volume carry over — reset at
+  CEST midnight, or clear `daily_trades.json`/`bot_state.json` for a clean start.
 - **CONFIRM BEFORE CHANGES.** Michael's standing rule: *"always confirm with me so you understand"* and
   *"be as precise as possible, don't make mistakes — this is my life work."* Plan → yes → then edit.
 - **NEVER auto-trade without an explicit go.** Default `.env` state is **safe**:
@@ -604,6 +610,13 @@ dedupe + ignore). `/help` command also done & deployed.
    NY file now has sweep + armed alerts + dashboard, all compiled clean. London: sweep+armed added but NOT
    yet compiled by Michael; London dashboard upgrade not done.
 NOTE: same screenshots can also set London defaults if Michael wants parity later.
+
+### ✅ MetaAPI auto-reconnect (2026-06-04, commit 53e18c5) — DONE
+Problem: bot connected to MetaAPI ONLY at boot; after the phase-2 account switch it showed "MetaAPI ❌
+disconnected" with no recovery. FIX: `mt5_executor` stores token/account_id; `ensure_connected()` retries
+init when down; the position-monitor loop calls it each poll → auto-reconnects (no manual restart). lifespan
+now starts the monitor even if the first connect fails. Verified phase-2 acct `3bd69d88` (FTraders-Bot
+Phase 2) is DEPLOYED+CONNECTED — bot just needed to reconnect. Tests green.
 
 ### ✅ 5m-only + max-lot fix (2026-06, commit 6b1ccd8) — DONE
 Problem: alert was on a 1m chart → 1m precision fires → 4-5 pip engulf SL → 1% risk made 8-12 lots →
