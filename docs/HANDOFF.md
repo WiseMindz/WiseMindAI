@@ -103,6 +103,22 @@ London session engine (09:00–11:15 CEST). T1 (immediate reversal) + T2 (AMD re
 - ✅ **24h auto-close** (see "Shared feature" below).
 - Kept `maxSignalsPerSession = 1`.
 
+### `wise_ny_v5.pine` — **Wise NY v5.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
+Copy of `wise_ny_v4.pine` → **`~/Downloads/wise_ny_v5.pine`** (v4 kept). = v4 + **Prev-NY-liquidity (PNYH/PNYL)
+sweep fix** Michael caught: chart was littered with stale "Sweep PNYH/PNYL" marks because the prev-NY level
+was captured a session too late and never reset cleanly. Fixes (confirmed: base v4, detect ALL DAY incl Asia,
+label as BSL/SSL external): (1) added `nyEnded = not inNY and inNY[1]`; (2) **capture `prevNyHigh/Low` at NY
+END** (was at `nyStarted` = a session stale during the next day's Asia/London) — removed the nyStarted capture;
+(3) reset `prevNyHigh/LowSweptToday` + `pnyh/pnylSweptBar` in the nyEnded block (removed from `asiaStarted`) so
+the NEW level starts unswept; (4) `canDetectPnySweep` = drop `not inAsia` → detect any time, every session +
+off-hours; (5) labels `Sweep PNYL/H`→**`SSL ✕ PNYL`** / **`BSL ✕ PNYH`** (PNYH=external buy-side, PNYL=external
+sell-side liquidity). Verified scope/assignments. **NOT compiled.** Concept confirmed w/ Michael: PNYH/PNYL =
+EXTERNAL liquidity (BSL above highs, SSL below lows); FVG/OB = internal.
+**↳ NEXT (Michael's ask, NOT yet built — needs confirm):** port this PNY fix to **London → create
+`wise_london_v3.pine`**, BUT London v2 has NO NY-session tracking at all (only Asia/PD/PW) — so it's port + ADD
+NY box + nyHigh/Low + prevNy capture/detect. London runs before NY each day so it sweeps the PRIOR completed
+NY (same-day-after or next-day). Michael: "NY box must show in London too."
+
 ### `wise_ny_v4.pine` — **Wise NY v4.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
 Fresh copy of `wise_ny_v3.pine` → **`~/Downloads/wise_ny_v4.pine`** (v3 untouched as backup). v4 = all v3
 fixes PLUS **gold isolation** so XAUUSD stops running on EURUSD values. Michael caught it: on a gold chart
