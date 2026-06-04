@@ -84,7 +84,30 @@ London session engine (09:00–11:15 CEST). T1 (immediate reversal) + T2 (AMD re
 - ✅ **24h auto-close** (see "Shared feature" below).
 - Kept `maxSignalsPerSession = 1`.
 
-### `wise_ny_v3.pine` — **Wise NY v3.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
+### `wise_ny_v4.pine` — **Wise NY v4.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
+Fresh copy of `wise_ny_v3.pine` → **`~/Downloads/wise_ny_v4.pine`** (v3 untouched as backup). v4 = all v3
+fixes PLUS **gold isolation** so XAUUSD stops running on EURUSD values. Michael caught it: on a gold chart
+the header read `CUSTOM ⚙ MANUAL` and gold got `NY Status ✗ BLOCKED London>500tk` / `Asia 3384tk BLOCKED`
+because Custom mode fed EUR tick caps (500) to gold. **Workflow:** Michael keeps EURUSD on **Custom** (his
+tuned manual values) and **manually switches the profile to "Force XAUUSD"** for gold. The profile system
+already isolates symbols (EUR preset vs XAU preset are independent constants; Custom uses the manual inputs)
+— v4 just plugs the leaks so switching to Force XAUUSD = fully gold-tuned, **zero EUR leak, EURUSD untouched.**
+**4 XAU-side fixes (ratios stay shared — they're symbol-neutral):**
+1. **Gold tick caps 4000→6000** — `profileMaxAsiaTicks` + `profileMaxNyTicks` (XAU only; EUR stays 500). Gold
+   ranges $40-60 (4000-6000 ticks) so 4000 over-blocked NY.
+2. **SL buffer now profile-aware** — new `profileSlBuffer` (XAU 80tk=$0.80, EUR 15) + `slBufferEff`; all 6 SL
+   usages repointed. Was a flat 15tk for all symbols (=$0.15 on gold, too tight).
+3. **Min FVG size profile-aware** — new `profileMinFvgTicks` (XAU 30tk, EUR 4) + `minFvgTicksEff`. Was flat 4tk
+   (=$0.04 on gold → filter did nothing, micro-FVG noise).
+4. **Vol-confirm leak closed** — `volConfirmMult = useCustom ? manual : profileVolConfirm` (was `(useCustom or
+   overrideVolConfirmMult) ? manual : preset`). Now a symbol profile WINS; the override only acts in Custom.
+   Gold no longer keeps EUR's 1.25 — uses XAU preset 1.15.
+**Untouched & correct:** body% / RR / vol-ratio / all ×ATR filters are shared across symbols (symbol-neutral
+by design). EUR preset constants + Michael's Custom manual inputs: 0 changes. **Verify:** structural checks
+pass (no bare `slBuffer`/`minFvgSizeTicks` left in logic, scope/order OK, gold caps=6000). **NOT compiled** —
+Michael compiles next; if clean, v4 becomes the live NY indicator (EURUSD=Custom, gold=Force XAUUSD).
+
+### `wise_ny_v3.pine` — **Wise NY v3.0** (2026-06-04) — superseded by v4 (kept as backup)
 Fresh copy of `~/Downloads/wise_ny_v.2.pine` → **`~/Downloads/wise_ny_v3.pine`** (v2 left 100% untouched as
 backup). Built to fix a dashboard/fire **desync** Michael caught: a `1m-V2` precision fire on a 5m chart
 gated body ≥80% on the **chart candle**, but the dashboard "Engulf Body" + "Vol Strength" rows + the alert
