@@ -84,6 +84,30 @@ London session engine (09:00–11:15 CEST). T1 (immediate reversal) + T2 (AMD re
 - ✅ **24h auto-close** (see "Shared feature" below).
 - Kept `maxSignalsPerSession = 1`.
 
+### `wise_ny_v3.pine` — **Wise NY v3.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
+Fresh copy of `~/Downloads/wise_ny_v.2.pine` → **`~/Downloads/wise_ny_v3.pine`** (v2 left 100% untouched as
+backup). Built to fix a dashboard/fire **desync** Michael caught: a `1m-V2` precision fire on a 5m chart
+gated body ≥80% on the **chart candle**, but the dashboard "Engulf Body" + "Vol Strength" rows + the alert
+JSON read the **15m logic candle** (`eff*`) → showed 62% while the fire used a ≥80% candle. **Four fixes
+(all confirmed by Michael, two as toggles):**
+1. **Dashboard + alert JSON now read the CHART-TF candle** (1m chart→1m candle, 5m→5m), the SAME candle the
+   fire gate checks → dashboard = fire = bot, always synced. New globals `chartBullBodyPctV3 /
+   chartBearBodyPctV3 / chartVolMultV3 / chartTfStr` (after `effVolMult`). Dashboard rows (Vol Strength,
+   Engulf Body) + JSON `engulf_body_pct` / `vol_spike` repointed to these.
+2. **Freeze Signal Quality at fire** — input `freezeQualityAtFire` (gVis, default ON): live while watching,
+   snapshots the firing candle's exact body%/vol the moment a trade fires (`frozenEngPctV3/VolV3`,
+   `showEngPctV3/showVolV3`), resets at new NY session.
+3. **Correct TF tag** — `lastFireTfTag` now uses `chartTfStr` (e.g. `5m-V2` on 5m, `1m-V2` on 1m) instead of
+   hardcoded `"1m"`; JSON `tf_type` = `chartTfStr`. ⚠️ **BOT IMPACT:** this makes `EXECUTE_ONLY_5M` work by
+   chart TF — a fire from a **5m chart** tags `5m` → **bot trades it**; from a **1m chart** tags `1m` → bot
+   skips. So Michael must run the live TradingView alert on the **5m chart** for execution.
+4. **London sweep toggle** — input `londonBreakHoldCounts` (gSwp, default OFF = strict close-back). ON = a
+   clean break that HOLDS above/below the London H/L also counts as swept. New helpers
+   `isLondonSweepHigh/Low` (Asia/PD/PW still use the strict `isSweepHigh/Low`).
+**Verify:** structural checks pass (var scope/order OK, no hardcoded `1m` tag, London detection uses new
+helpers). **NOT compiled** — Michael compiles on TradingView next. If clean, this supersedes v2 as the live
+NY indicator (alert on 5m chart).
+
 ### `wise_ny_v1.pine` — **Wise NY v2.0** (~2611 lines) — LIVE (functional), compiles clean
 NY session engine (08:30–11:00 ET / 14:00–17:00 CEST). Same T1/T2 + 1m fire as London, plus Gold/PO3 work.
 **Shipped this session (the "make Gold work as well as EURUSD" update):**
