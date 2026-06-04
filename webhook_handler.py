@@ -63,9 +63,9 @@ async def lifespan(app: FastAPI):
         logger.info("MetaAPI: initializing MT5 connection...")
         ok = await mt5_executor.init_connection(METAAPI_TOKEN, METAAPI_ACCOUNT_ID)
         if not ok:
-            logger.warning("⚠️  MetaAPI init failed — webhook will run WITHOUT MT5 execution")
-        elif BE_ENABLED or EXPIRY_ENABLED:
-            # Position monitor = breakeven (SL→entry at trigger_r) + time-expiry (auto-close)
+            logger.warning("⚠️  MetaAPI init failed at boot — position monitor will auto-reconnect")
+        # Always start the monitor — it AUTO-RECONNECTS if the link is/was down (no manual restart needed)
+        if BE_ENABLED or EXPIRY_ENABLED:
             be_trigger = BE_TRIGGER_R if BE_ENABLED else 10_000.0   # huge = effectively off
             exp_hours  = EXPIRY_HOURS if EXPIRY_ENABLED else 0.0     # 0 = off
             mt5_executor.start_position_monitor(be_trigger, BE_BUFFER_PIPS, exp_hours, BE_POLL_SECONDS)

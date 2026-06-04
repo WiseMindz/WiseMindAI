@@ -23,11 +23,12 @@ session** and **update it at the end of every work slice**. If this file and you
 - **🔴 NEVER place test/manual trades on the FUNDINGTRADERS challenge account (Michael's explicit order,
   2026-06).** No `execute_trade`/`create_*_order`/open-position scripts against it — not even "to verify."
   The bot may only trade REAL A+ signals from the indicators once live. Verify via read-only/dashboard only.
-- **Stage 2 IN PROGRESS:** FundingTraders MetaAPI account created — ID `a922247c-519d-4a42-a4af-9c3cfe22a4d9`,
-  MT5-95392 "FundingTraders-Bot", `FundingTradersGroup-Server`, high reliability, **Connected + Deployed**.
-  Switch the bot by setting Railway `METAAPI_ACCOUNT_ID=a922247c-…`, `ACCOUNT_BALANCE=50000`,
-  `MT5_MIN_GRADE=A+`. Old demo (`bd1c91cb…`, ICMarketsEU-Demo) still deployed — UNDEPLOY it after the switch
-  is verified to avoid double MetaAPI billing.
+- **Stage 2 — PHASE 2 (2026-06-04):** Michael advanced to FundingTraders **PHASE 2**. New MetaAPI account
+  ID `3bd69d88-3055-4d93-b649-450b99c52396`. Switch the bot: Railway `METAAPI_ACCOUNT_ID=3bd69d88-…`,
+  keep `ACCOUNT_BALANCE=50000` (confirm phase-2 size), `MT5_MIN_GRADE=B` (Michael's choice). UNDEPLOY the
+  old phase-1 account (`a922247c-…`) to avoid double billing. NOTE: daily-cap + dd state on the /data volume
+  carry over from phase 1 — reset at CEST midnight, or clear `daily_trades.json`/`bot_state.json` for a
+  fresh start on the new account. (Phase-1 account was `a922247c-…` MT5-95392.)
 - **CONFIRM BEFORE CHANGES.** Michael's standing rule: *"always confirm with me so you understand"* and
   *"be as precise as possible, don't make mistakes — this is my life work."* Plan → yes → then edit.
 - **NEVER auto-trade without an explicit go.** Default `.env` state is **safe**:
@@ -595,9 +596,25 @@ dedupe + ignore). `/help` command also done & deployed.
    - HTF Bias1 **15m**, HTF Bias2 **1H**, trend lookback **50**. SL buffer **15**, swing lookback **16**,
      min dist **0.4**, engulf-first OFF, show SL source ON, show SL/TP boxes ON. Daily/Weekly liquidity: last
      **1** day; Daily High/Low lines OFF, PWH/PWL OFF.
-3. **NY live-box upgrade** — add London's "Signal Quality" block (Vol Strength, Engulf Body, Displacement,
-   FVG Zone, HTF OB) + "Risk Gates" block, personalized for NY (NY sweep/PO3/Prev-NY). NY dashboard code ~L2300+.
+3. **NY live-box upgrade — ✅ DONE & COMPILED CLEAN (2026-06):** added to `wise_ny_v.2.pine` drawDashboard
+   (rows 12-18, table had spare capacity): "— Signal Quality —" (Vol Strength=effVolMult, Engulf Body=
+   max(bullBodyPct,bearBodyPct), FVG Zone=hasFvgNearby, Consolidation=isConsolidation) + "— Risk Gates —"
+   (NY Sell Gate=edgeNySellGate). Displacement/HTF-OB/Both-Swept/Timing rows NOT added (NY lacks clean global
+   vars; London's edge set differs) — optional future dig (nyT2Displacement exists, needs scope check).
+   NY file now has sweep + armed alerts + dashboard, all compiled clean. London: sweep+armed added but NOT
+   yet compiled by Michael; London dashboard upgrade not done.
 NOTE: same screenshots can also set London defaults if Michael wants parity later.
+
+### ✅ 5m-only + max-lot fix (2026-06, commit 6b1ccd8) — DONE
+Problem: alert was on a 1m chart → 1m precision fires → 4-5 pip engulf SL → 1% risk made 8-12 lots →
+"not enough money" fail. Also the Pine hardcodes the "1m" tag (L2018) so 5m-chart precision fires mislabel
+as 1m. FIX (bot): `EXECUTE_ONLY_5M=true` skips any signal whose tf_type/tf contains "1m"; `MAX_LOT_SIZE=5.0`
+hard-caps oversized orders → skip + Telegram. Both default-on (no Railway var needed). Tested + 35 tests green.
+**MANUAL sync Michael must do for 5m trades to EXECUTE:** in NY+London indicator → Logic Timeframe 15m→**5m**,
+**uncheck** Enable 1m Precision Fire; set TV **chart to 5m**; re-create the alert on the 5m chart; compile the
+.pine (sweep+armed alerts). Then fires are clean 5m (tagged "5m", proper SL, sane lot) and execute. NOTE:
+Logic 15m→5m changes NY setup computation (5m vs 15m structure) — Michael's strategy choice. (Alt Pine fix
+for later: make the precision-fire tag reflect the real chart TF instead of hardcoded "1m", L2018.)
 
 ### 💡 Live setup play-by-play (Michael's idea — confirm before build)
 Michael wants real-time updates as a setup FORMS: "Asia sweep occurred", "displacement confirmed",

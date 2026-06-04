@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 _api        = None
 _connection = None
 _connected  = False
+_token      = None    # stored so the monitor can auto-reconnect if the link drops
+_account_id = None
 
 # Grade priority for min-grade filter — 4-tier, synced with the indicator (A+ > A > B > C)
 GRADE_ORDER = {"A+": 4, "A": 3, "B": 2, "C": 1}
@@ -28,11 +30,13 @@ async def init_connection(token: str, account_id: str) -> bool:
     Initialize MetaAPI connection at app startup.
     Returns True if connected and synchronized, False on failure.
     """
-    global _api, _connection, _connected
+    global _api, _connection, _connected, _token, _account_id
 
     if not token or not account_id:
         logger.warning("MetaAPI: token or account_id missing — execution disabled")
         return False
+
+    _token, _account_id = token, account_id   # remember creds for auto-reconnect
 
     try:
         from metaapi_cloud_sdk import MetaApi  # imported here so missing lib doesn't crash startup
@@ -79,6 +83,16 @@ async def close_connection() -> None:
 
 def is_connected() -> bool:
     return _connected
+
+
+async def ensure_connected() -> bool:
+    """Auto-reconnect: if the MetaAPI link is down, retry with the stored creds."""
+    if _connected and _connection is not None:
+        return True
+    if not _token or not _account_id:
+        return False
+    logger.info("MetaAPI: link down — attempting reconnect...")
+    return await init_connection(_token, _account_id)
 
 
 async def get_account_equity() -> Optional[float]:
@@ -348,8 +362,13 @@ async def run_position_monitor(be_trigger_r: float, be_buffer_pips: float,
     )
     while True:
         try:
-            await _check_breakeven_once(be_trigger_r, be_buffer_pips)
-            await _check_expiry_once(expiry_hours)
+            # Auto-reconnect if the link dropped (or never connected at boot)
+            if not _connected:
+                if await ensure_connected():
+                    logger.info("✅ MetaAPI: reconnected")
+            if _connected:
+                await _check_breakeven_once(be_trigger_r, be_buffer_pips)
+                await _check_expiry_once(expiry_hours)
         except asyncio.CancelledError:
             logger.info("🔒 Position monitor stopped")
             raise
