@@ -125,6 +125,15 @@ sample = high variance. Plan: test fix A in isolation first. **STATUS 2026-06-04
 the TradingView panel to TEST now, and/or (b) grants Full Disk Access then says "retry" so the code default
 is baked, or (c) moves the `wise_ny_*.pine` files into `~/AI Coding/wisemind-ai/` (accessible) for future
 edits. NEXT ACTION when unblocked: edit `edgeGoldDisplaceBoost` input default 1.3→1.0 in wise_ny_v4.pine.
+**✅ DONE 2026-06-04 (Downloads access restored after FDA grant): FULL GOLD PRESET built into wise_ny_v4.pine**
+(Michael chose all-6-at-once). All XAU-side, EUR untouched: (1) `edgeGoldDisplaceBoost` 1.3→**1.0** (double-count
+killed); (2) `profileVolConfirm` XAU 1.15→**1.05**; (3) `profileSlMinAtr` XAU 0.60→**0.70**; (4) gold NY killzone
+via `nySessEff = useXauPreset ? "0900-1100" : nySess` (skip 08:30 spike); (5) gold HTF via `htfAlignModeEff =
+useXauPreset ? "4H only" : htfAlignMode`; (6) gold body via `nyT1BodyRatioEff`/`nyT2BodyRatioEff` (XAU 0.80).
+New gold-effective vars added + all usages repointed; verified 0 bare `htfAlignMode ==` / 0 bare body-ratio
+checks left, scope order OK. **NOT compiled** — Michael compiles next. ⚠️ Methodology caveat (told Michael):
+6-at-once means if results change we won't know which fix did it; #6 body% is the most debatable (looser = weaker
+setups) — revert first if gold quality drops. Need a real test-week sample (>9 trades) before judging.
 
 ### `wise_ny_v3.pine` — **Wise NY v3.0** (2026-06-04) — superseded by v4 (kept as backup)
 Fresh copy of `~/Downloads/wise_ny_v.2.pine` → **`~/Downloads/wise_ny_v3.pine`** (v2 left 100% untouched as
