@@ -110,8 +110,9 @@ NY indicator (alert on 5m chart).
 
 **Defaults baked from Michael's live settings (2026-06-04, read off his TradingView Inputs panel):** 6
 deltas from the v2 code defaults → now v3 ships pre-tuned: `profileOverride` Auto→**Custom (manual values)**;
-`oneMinBodyRatio` (1m T1) 0.80→**0.75**; `t2DisplaceAtrManual` 1.25→**1.5** (his explicit ask — stricter T2);
-`pdTouchWindow` 15→**20**; `volConfirmMultManual` 1.5→**1.25**; `beThresholdR` 1.5→**2.0**. Everything else
+`oneMinBodyRatio` (1m T1) 0.80→**0.75**; `obMinMoveAtr` (Order-Blocks Min Displacement) 1.0→**1.5** (his ask;
+T2 min displacement stays **1.25** — initially mis-set to 1.5, reverted); `pdTouchWindow` 15→**20**;
+`volConfirmMultManual` 1.5→**1.25**; `beThresholdR` 1.5→**2.0**. Everything else
 already matched. ⚠️ **BOT SYNC TODO:** the bot does the REAL breakeven (env `BE_TRIGGER_R=1.5`) — to match
 the indicator's new 2R, set **Railway `BE_TRIGGER_R=2.0`**. ⚠️ `profileOverride=Custom` disables EURUSD/XAU
 auto-tuning (uses manual values for ALL symbols) — fine for EURUSD, but gold would use EUR-tuned values.
