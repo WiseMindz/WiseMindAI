@@ -70,6 +70,19 @@ the in-editor compile above.
 **Both indicators are split out of the v9.25 monolith and live on TradingView.** Latest builds compiled
 clean and are saved.
 
+### `wise_london_v3.pine` — **Wise London v3.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
+Copy of `wise_london_v2.pine` → **`~/Downloads/wise_london_v3.pine`** (v2 kept). = v2 + a whole **NY-liquidity
+layer built from scratch** (London v2 had ZERO NY tracking — only Asia/PD/PW). Michael's model: a NY-high
+sweep (BSL grab) biases London SHORT; a NY-low sweep (SSL grab) biases LONG — same reversal logic as Asia.
+London runs before NY each day so it sweeps the PRIOR completed NY (same-day-after or next-day). **CONTEXT
+ONLY — does NOT change London's Asia/PD/PW entry triggers → EUR performance intact** (Michael chose "show +
+detect", not "tradeable"). Added: `nySess` input (0830-1100); `inNY/nyStarted/nyEnded`; `showNYBox` toggle
+(OFF by default) + `nyBoxColor`; NY box tracking; `prevNyHigh/Low` captured at **NY END** (mirrors v5);
+`prevNy*SweptToday` flags reset at nyEnded; **all-day** PNY sweep detection → labels **`BSL ✕ PNYH`** /
+**`SSL ✕ PNYL`** (external liquidity); `nySweepBias` var → new dashboard row 24 "NY Sweep" (▲ long / ▼ short),
+table extended 24→25 rows. Verified: all vars/scope OK, deps exist, no dup nyHigh, top-level placement. **NOT
+compiled.** Mirrors v5's PNY logic + London v2's structure (both compiled-clean patterns).
+
 ### `wise_london_v2.pine` — **Wise London v2.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
 Fresh copy of `wise_london_v1.pine` → **`~/Downloads/wise_london_v2.pine`** (v1 untouched). Ports ALL the NY
 v3+v4 work to London so both engines are aligned. **9 changes, EURUSD firing logic UNCHANGED** (only display/
