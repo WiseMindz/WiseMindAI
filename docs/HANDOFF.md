@@ -148,6 +148,12 @@ gate/bias/pd refs, EQH/EQL intact, entry engine = clean v5(NY)/v3(London). **Box
 Asia/London box code was fine (identical to v5/v3) — the clutter was the precision-layer lines; NO box code
 change needed, keep simple session boxes (start→end, NOT forward-extended — my extend-forward idea dropped).
 **Current latest test pines: NY v7, London v5.** Both NOT compiled yet.
+**⚠️ COMPILE-FIX 2026-06-05:** the gate-removal `replace_all(" and v6…Gate","")` collapsed the line break
+wherever the gate was the LAST token on a line → merged it with the next line (CE10156 "Syntax error at input
+nyT2RefHigh"). Hit 5 sites/file: NY = 3 T2 if-blocks + canFireBaseL1m/S1m; London = longBase/shortBase + 2 T2
+if-blocks + canFireT2L/S. All 10 re-split; verified 0 merge signatures remain. LESSON: when using replace_all
+with an EMPTY replacement on an end-of-line token, it can eat the trailing newline — re-scan for merged lines
+after. v6/v4 untouched (still have gates). Recompile v7/v5.
 
 ### `wise_ny_v5.pine` — **Wise NY v5.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
 Copy of `wise_ny_v4.pine` → **`~/Downloads/wise_ny_v5.pine`** (v4 kept). = v4 + **Prev-NY-liquidity (PNYH/PNYL)
