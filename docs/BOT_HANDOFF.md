@@ -21,8 +21,8 @@ session** and **update it at the end of every work slice**. If this file and you
 
 ## 1. Hard rules (NON-NEGOTIABLE — both tools obey)
 - **🔴 RISK MATH (2026-06-05): Michael wants 2 trades/day (1 NY + 1 London). Per-trade risk MUST be ≤0.9%
-  so 2 losses ≤ 1.8% < the 1.9% FundingTraders limit.** Config: `MAX_TRADES_PER_DAY=2`, `MAX_RISK_DOLLARS=450`
-  (0.9% of 50k), `MAX_DAILY_LOSS_PCT=1.8`. ⚠️ DANGER if `MAX_RISK_DOLLARS=500` (1%) WITH 2 trades → 2% = breach.
+  so 2 losses stay < the 1.9% FundingTraders limit.** Config: `MAX_TRADES_PER_DAY=2`, `MAX_RISK_DOLLARS=470`
+  (2×$470=$940=1.88%, just under 1.9%), `MAX_DAILY_LOSS_PCT=1.8`. (Hard ceiling is $475=exactly 1.9%/zero margin.) ⚠️ DANGER if `MAX_RISK_DOLLARS=500` (1%) WITH 2 trades → 2% = breach.
   The daily-loss guard CAN'T prevent the 2nd trade (after trade-1's 1% loss the guard isn't hit yet), so the
   per-trade cap is the real protection. **RAILWAY (Michael): set `MAX_RISK_DOLLARS=450`, `MAX_TRADES_PER_DAY=2`,
   `MAX_DAILY_LOSS_PCT=1.8`, verify `ACCOUNT_RISK_PERCENT`/`ACCOUNT_BALANCE`.** (.env mirrors this.)
