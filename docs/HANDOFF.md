@@ -82,6 +82,14 @@ detect", not "tradeable"). Added: `nySess` input (0830-1100); `inNY/nyStarted/ny
 **`SSL ✕ PNYL`** (external liquidity); `nySweepBias` var → new dashboard row 24 "NY Sweep" (▲ long / ▼ short),
 table extended 24→25 rows. Verified: all vars/scope OK, deps exist, no dup nyHigh, top-level placement. **NOT
 compiled.** Mirrors v5's PNY logic + London v2's structure (both compiled-clean patterns).
+**PNY REFINEMENT (2026-06-05, applied to BOTH wise_ny_v5 + wise_london_v3):** per Michael — (a) chart labels
+simplified `BSL ✕ PNYH`/`SSL ✕ PNYL` → just **`PNYH`/`PNYL`** (BSL/SSL stays a concept in London's dashboard
+bias row, not on labels); (b) added **rolling forward target lines**: at NY close, delete the old PNYH/PNYL
+line+label pair and draw fresh dashed lines at the new prev-NY levels, extended each bar — so the levels are
+SHOWN continuously until the next NY close rolls them (`pnyhLine/pnylLine/pnyhLbl/pnylLbl` vars); (c) added a
+visible **`Sweep NY H/L` toggle** to the Sweep Detection group in BOTH (London Michael flagged it was missing)
+— gates `canDetectPnySweep` + the line draw. Verified both files: 0 stray `BSL ✕`/`SSL ✕` in code, toggle +
+gate + rolling-line vars present. Still NOT compiled.
 
 ### `wise_london_v2.pine` — **Wise London v2.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
 Fresh copy of `wise_london_v1.pine` → **`~/Downloads/wise_london_v2.pine`** (v1 untouched). Ports ALL the NY
