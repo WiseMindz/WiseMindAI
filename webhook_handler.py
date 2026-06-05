@@ -41,6 +41,7 @@ from config import (
     ERROR_ALERTS,
     EXECUTE_ONLY_5M,
     MAX_LOT_SIZE,
+    MAX_RISK_DOLLARS,
 )
 from database import save_trade, save_message
 from signal_utils import evaluate_signal
@@ -114,6 +115,11 @@ def get_pip_size(symbol: str) -> float:
 
 def calculate_lot_size(symbol: str, entry: float, sl: float, balance: float, risk_pct: float) -> dict:
     risk_dollars = balance * (risk_pct / 100.0)
+    # HARD SAFETY CAP: never risk more than MAX_RISK_DOLLARS per trade, no matter what
+    # ACCOUNT_BALANCE / ACCOUNT_RISK_PERCENT are set to. Protects the funded account from a
+    # misconfigured balance or risk% (0 = cap disabled).
+    if MAX_RISK_DOLLARS > 0 and risk_dollars > MAX_RISK_DOLLARS:
+        risk_dollars = MAX_RISK_DOLLARS
     sl_distance_price = abs(entry - sl)
     pip_size = get_pip_size(symbol)
     sl_pips = sl_distance_price / pip_size

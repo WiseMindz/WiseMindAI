@@ -59,6 +59,9 @@ MT5_MIN_GRADE = os.getenv("MT5_MIN_GRADE", "B")
 EXECUTE_ONLY_5M = os.getenv("EXECUTE_ONLY_5M", "true").lower() == "true"
 # Hard cap on lot size — skip any order bigger than this (prevents "not enough money").
 MAX_LOT_SIZE    = float(os.getenv("MAX_LOT_SIZE", "5.0"))   # 0 = no cap
+# Hard cap on $ RISKED per trade — overrides ACCOUNT_BALANCE × ACCOUNT_RISK_PERCENT if that would
+# risk more. Belt-and-suspenders so a wrong balance/risk% can NEVER over-risk the funded account.
+MAX_RISK_DOLLARS = float(os.getenv("MAX_RISK_DOLLARS", "0"))   # 0 = off; set 500 on a $50k account
 
 # ── Breakeven monitor (replicates Pine "Auto Move SL to Breakeven") ───────────
 # When an open position reaches BE_TRIGGER_R profit, its SL is moved to entry.
