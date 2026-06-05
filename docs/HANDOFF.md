@@ -139,6 +139,15 @@ gated); NY table 20→21, London 25→27. New input group `◆ Precision Layer`.
 (gate defined before every use), atr14 exists, gate counts correct, titles bumped. **NOT compiled** — Michael
 compiles next; toggles default-off so it's safe to drop on a live chart. Suggested test order: watch the
 Daily Bias + Prem/Disc readouts first, then enable one gate at a time.
+**↳ REVERTED 2026-06-05 → `wise_ny_v7.pine` + `wise_london_v5.pine` (NEW, v6/v4 kept as backups):** Michael
+said Daily Bias Chain + Premium/Discount "made the whole thing worse" → **both gates REMOVED**, **EQH/EQL
+KEPT** (display-only). Removed: the 2 gate inputs (applyDailyBias/applyPdGate) + pdLookback, the Daily-Bias +
+P/D + combined-gate compute blocks, all `and v6Long/ShortGate` from fires (NY 7, London 6), the 2 dashboard
+rows (Daily Bias/Prem-Disc), table sizes back (NY 21→20, London 27→25), titles → v7/v5. Verified 0 leftover
+gate/bias/pd refs, EQH/EQL intact, entry engine = clean v5(NY)/v3(London). **Boxes:** Michael confirmed the
+Asia/London box code was fine (identical to v5/v3) — the clutter was the precision-layer lines; NO box code
+change needed, keep simple session boxes (start→end, NOT forward-extended — my extend-forward idea dropped).
+**Current latest test pines: NY v7, London v5.** Both NOT compiled yet.
 
 ### `wise_ny_v5.pine` — **Wise NY v5.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
 Copy of `wise_ny_v4.pine` → **`~/Downloads/wise_ny_v5.pine`** (v4 kept). = v4 + **Prev-NY-liquidity (PNYH/PNYL)
