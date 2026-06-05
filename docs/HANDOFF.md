@@ -124,6 +124,22 @@ London session engine (09:00–11:15 CEST). T1 (immediate reversal) + T2 (AMD re
 - ✅ **24h auto-close** (see "Shared feature" below).
 - Kept `maxSignalsPerSession = 1`.
 
+### `wise_ny_v6.pine` + `wise_london_v4.pine` — **PRECISION LAYER** (NEW 2026-06-05) — ⏳ NOT COMPILED
+Copies: `wise_ny_v5`→**`wise_ny_v6.pine`**, `wise_london_v3`→**`wise_london_v4.pine`** (olds kept). Added the
+3 ICT precision features from the session-sweep research brief, **identically to both**: **(1) Daily Bias
+Chain** — the day's FIRST liquidity grab = the manipulation; earliest high-side vs low-side sweep bar sets
+`dailyBias` (swept HIGH first→▼Bearish day, LOW first→▲Bullish). NY uses ah/al/lh/ll/pnyh/pnylSweptBar;
+London uses sweepShortBar/sweepLongBar + pnyh/pnylSweptBar. **(2) Premium/Discount** — `pdEq` = mid of a
+`pdLookback`(50)-bar dealing range; `pdState` Premium/Discount/Equilibrium. **(3) EQH/EQL** — `ta.pivothigh/low(eqPivotLen=5)`
+within `eqTolAtr`(0.10)×ATR → dotted fuchsia line + "EQH"/"EQL" label (display-only, `showEQ` default ON).
+**Gates: `applyDailyBias` + `applyPdGate` default OFF** → `v6LongGate/v6ShortGate` resolve to `true` →
+AND-ed into all fire conditions (NY: 7 = 3 long/4 short; London: 6 = longBase/shortBase + T2 paths) → **entries
+byte-identical until Michael switches a gate ON.** Dashboard: +2 rows "Daily Bias" / "Prem/Disc" (🔒 when
+gated); NY table 20→21, London 25→27. New input group `◆ Precision Layer`. Verified: vars/scope order OK
+(gate defined before every use), atr14 exists, gate counts correct, titles bumped. **NOT compiled** — Michael
+compiles next; toggles default-off so it's safe to drop on a live chart. Suggested test order: watch the
+Daily Bias + Prem/Disc readouts first, then enable one gate at a time.
+
 ### `wise_ny_v5.pine` — **Wise NY v5.0** (NEW 2026-06-04) — ⏳ NOT YET COMPILED by Michael
 Copy of `wise_ny_v4.pine` → **`~/Downloads/wise_ny_v5.pine`** (v4 kept). = v4 + **Prev-NY-liquidity (PNYH/PNYL)
 sweep fix** Michael caught: chart was littered with stale "Sweep PNYH/PNYL" marks because the prev-NY level
