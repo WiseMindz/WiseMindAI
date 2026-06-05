@@ -20,6 +20,14 @@ session** and **update it at the end of every work slice**. If this file and you
 ---
 
 ## 1. Hard rules (NON-NEGOTIABLE — both tools obey)
+- **🔴 RISK = MAX $500/trade on the $50k FundingTraders account (their 1.9% daily-loss limit).**
+  2026-06-05: the bot risked **$1000 (2%)** on a trade — root cause = effective `ACCOUNT_BALANCE×RISK%` =
+  $1000 (local .env had `ACCOUNT_BALANCE=100000`; with Railway balance=50k the culprit is `ACCOUNT_RISK_PERCENT
+  =2.0`). **FIX (commit b3e073a, pushed):** added hard cap `MAX_RISK_DOLLARS` in `config.py` + `calculate_lot_size`
+  (webhook_handler) — caps `risk_dollars` so a wrong balance/risk% can NEVER over-risk (0=off). Local .env set:
+  `ACCOUNT_BALANCE=50000`, `MAX_RISK_DOLLARS=500`, `MAX_DAILY_LOSS_PCT=1.5` (was 2 — must be UNDER the 1.9% rule).
+  **⚠️ RAILWAY TODO (Michael):** set `MAX_RISK_DOLLARS=500`, verify `ACCOUNT_RISK_PERCENT=1.0` (likely 2.0 — the
+  bug), `ACCOUNT_BALANCE=50000`, `MAX_DAILY_LOSS_PCT=1.5`. Tests: +2 cap tests, 37 pass.
 - **🔴 NEVER place test/manual trades on the FUNDINGTRADERS challenge account (Michael's explicit order,
   2026-06).** No `execute_trade`/`create_*_order`/open-position scripts against it — not even "to verify."
   The bot may only trade REAL A+ signals from the indicators once live. Verify via read-only/dashboard only.
