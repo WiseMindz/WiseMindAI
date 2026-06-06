@@ -298,6 +298,24 @@ user's local MT5 app is **NOT** in the trade path — it's only a viewing window
 
 ## 5. NEXT TASK QUEUE  (do top-first; CONFIRM before editing — see §1)
 
+> **🧠⭐ BIG VISION — PARKED 2026-06-06 (Michael; revisit, 12h reminder set). Two linked ideas:**
+> **(1) Record EVERYTHING + server-side learning brain** (full brief given 2026-06-06). Pine is STATELESS —
+> a brain CANNOT live inside the indicator (no persistence, can't write/learn between reloads). The brain must
+> live in the BOT (persistent DB). Gaps to fix: bot-managed exits (24h/BE) never recorded → result=NULL →
+> invisible in /stats; no real fill/lot/R stored; skipped signals not structured; no signal→trade→outcome link.
+> PLAN — Phase A: complete recording (MetaAPI deal-history reconciliation → capture every TP/SL/BE/expiry with
+> real fill+R; structured signal log w/ features; link signal→trade→outcome). Phase B: learning layer (rolling
+> stats by session/swept-level/feature/month, accumulated & permanent; auto "what wins/leaks"). Phase C: adaptive
+> recommendations (brain SUGGESTS tuning, never auto-changes). This is also the real path to session-sweep
+> PRECISION — learn empirically which sweep conditions win, vs guessing filters (the Daily-Bias/Prem-Disc gates
+> were tried and REMOVED — made it worse).
+> **(2) "Coded/AI system in TradingView that recognizes the strategy → auto-places MT5 entries."** NOTE: the
+> CURRENT architecture ALREADY does this core loop — Pine (coded rules) recognizes the setup → webhook alert →
+> bot → MetaAPI → MT5 entry. So it exists. The NEW angle to explore: a more FLEXIBLE recognition layer (AI/ML
+> pattern-recognition of the strategy rather than rigid Pine rules) + the learning brain deciding when "everything
+> falls in line" before firing. Discuss feasibility/architecture (Pine limits, where AI recognition would run =
+> server, cost, latency, prop-firm rules) at the 12h check-in. CONFIRM scope before any build.
+
 > **▶ Exact-settings parity — PART 1 (bot side) ✅ SHIPPED & tested on demo.** Added the time-expiry
 > monitor (mirrors Pine `tradeExpiryHours=24`) into the position monitor, plus per-position settings
 > (`register_position_settings`) so the bot uses `be_trigger_r`/`expiry_hours` sent by Pine, falling back
