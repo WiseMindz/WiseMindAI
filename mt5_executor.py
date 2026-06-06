@@ -192,11 +192,12 @@ async def execute_trade(
             result = await _connection.create_market_sell_order(symbol, lot, sl, tp, options)
 
         order_id    = str(result.get("orderId") or result.get("positionId") or "")
+        position_id = str(result.get("positionId") or order_id or "")
         entry_price = result.get("openPrice", 0)
 
         logger.info(f"✅ MT5 executed: {side} {lot} {symbol} @ {entry_price} | #{order_id}")
 
-        return {"success": True, "order_id": order_id, "entry_price": entry_price}
+        return {"success": True, "order_id": order_id, "position_id": position_id, "entry_price": entry_price}
 
     except Exception as e:
         err = str(e)[:150]
@@ -360,6 +361,8 @@ async def run_position_monitor(be_trigger_r: float, be_buffer_pips: float,
         f"🔒 Position monitor started — BE trigger {be_trigger_r}R / buffer {be_buffer_pips} pips, "
         f"expiry {expiry_hours}h (0=off), poll {poll_seconds}s"
     )
+    import time as _t
+    last_reconcile = 0.0
     while True:
         try:
             # Auto-reconnect if the link dropped (or never connected at boot)
@@ -369,12 +372,40 @@ async def run_position_monitor(be_trigger_r: float, be_buffer_pips: float,
             if _connected:
                 await _check_breakeven_once(be_trigger_r, be_buffer_pips)
                 await _check_expiry_once(expiry_hours)
+                # LEARNING BRAIN: periodic broker reconciliation (read-only; gated by env)
+                if _t.time() - last_reconcile >= 1:  # cheap inner gate; real interval below
+                    last_reconcile = await _maybe_reconcile(last_reconcile)
         except asyncio.CancelledError:
             logger.info("🔒 Position monitor stopped")
             raise
         except Exception as e:
             logger.error(f"Position monitor loop error: {type(e).__name__}: {str(e)[:120]}")
         await asyncio.sleep(poll_seconds)
+
+
+async def _maybe_reconcile(last_reconcile: float) -> float:
+    """Run a reconciliation pass at most every RECONCILE_POLL_SECONDS. Returns new timestamp."""
+    import time as _t
+    try:
+        from config import RECONCILE_ENABLED, RECONCILE_POLL_SECONDS, RECONCILE_LOOKBACK_HRS
+    except Exception:
+        return last_reconcile
+    if not RECONCILE_ENABLED:
+        return last_reconcile
+    now = _t.time()
+    if now - last_reconcile < RECONCILE_POLL_SECONDS:
+        return last_reconcile
+    try:
+        import reconcile
+        from database import get_reconciled_position_ids, save_broker_result, get_risk_by_position
+        risk_map = await get_risk_by_position()
+        await reconcile.reconcile_once(
+            _connection, get_reconciled_position_ids, save_broker_result,
+            risk_by_position=risk_map, lookback_hours=RECONCILE_LOOKBACK_HRS,
+        )
+    except Exception as e:
+        logger.error(f"reconcile pass error: {type(e).__name__}: {str(e)[:120]}")
+    return now
 
 
 def start_position_monitor(be_trigger_r: float, be_buffer_pips: float,

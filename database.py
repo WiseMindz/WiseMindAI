@@ -71,6 +71,35 @@ async def init_db():
             ON messages(chat_id, timestamp DESC)
         """)
 
+        # ── LEARNING BRAIN: full signal log (every signal — fired OR skipped + reason) ──
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                symbol TEXT, direction TEXT, trade_type TEXT, session TEXT, tf TEXT,
+                entry REAL, sl REAL, tp REAL, rr REAL, grade TEXT, score REAL,
+                vol_spike REAL, engulf_pct REAL, htf_aligned INTEGER, swept TEXT,
+                fired INTEGER, skip_reason TEXT, order_id TEXT
+            )
+        """)
+        # ── LEARNING BRAIN: executions (real fills — risk + position_id for R + linking) ──
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS executions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                order_id TEXT, position_id TEXT, symbol TEXT, direction TEXT,
+                lot REAL, fill_price REAL, sl REAL, tp REAL, risk_dollars REAL,
+                session TEXT, grade TEXT, tf TEXT
+            )
+        """)
+        # ── LEARNING BRAIN: tag trade_results with source + position_id (safe if present) ──
+        for ddl in ("ALTER TABLE trade_results ADD COLUMN source TEXT DEFAULT 'pine'",
+                    "ALTER TABLE trade_results ADD COLUMN position_id TEXT"):
+            try:
+                await db.execute(ddl)
+            except Exception:
+                pass  # column already exists
+
         await db.commit()
 
 
@@ -302,3 +331,94 @@ async def get_recent_results(limit: int = 10) -> List[dict]:
             rows = await cursor.fetchall()
             cols = [c[0] for c in cursor.description]
             return [dict(zip(cols, row)) for row in rows]
+
+
+# ==================== LEARNING BRAIN (signals · executions · reconciliation) ====================
+
+async def save_signal(data: dict, evaluation: dict, fired: bool, skip_reason: str = "",
+                      order_id: str = "") -> None:
+    """Log EVERY incoming signal (fired or skipped) with its features + reason."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO signals (timestamp, symbol, direction, trade_type, session, tf,
+                entry, sl, tp, rr, grade, score, vol_spike, engulf_pct, htf_aligned,
+                swept, fired, skip_reason, order_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            datetime.now().isoformat(), data.get("symbol"), str(data.get("side", "")).lower(),
+            data.get("trade", ""), data.get("session", ""),
+            str(data.get("tf_type", data.get("tf", ""))),
+            _f(data.get("entry")), _f(data.get("sl")), _f(data.get("tp")), _f(data.get("rr")),
+            evaluation.get("rating", ""), _f(evaluation.get("score")),
+            _f(data.get("vol_spike")), _f(data.get("engulf_body_pct")),
+            1 if data.get("htf_aligned") else 0, str(data.get("swept", "")),
+            1 if fired else 0, skip_reason, str(order_id or ""),
+        ))
+        await db.commit()
+
+
+async def save_execution(order_id: str, position_id: str, symbol: str, direction: str,
+                         lot: float, fill_price: float, sl: float, tp: float,
+                         risk_dollars: float, session: str, grade: str, tf: str) -> None:
+    """Log a REAL fill (for accurate R + reconciliation linking)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO executions (timestamp, order_id, position_id, symbol, direction,
+                lot, fill_price, sl, tp, risk_dollars, session, grade, tf)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (datetime.now().isoformat(), str(order_id or ""), str(position_id or ""),
+              symbol, str(direction).lower(), _f(lot), _f(fill_price), _f(sl), _f(tp),
+              _f(risk_dollars), session, grade, tf))
+        await db.commit()
+
+
+async def get_risk_by_position() -> dict:
+    """{position_id|order_id: risk_dollars} so reconciliation can compute real R."""
+    out = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT position_id, order_id, risk_dollars FROM executions") as cur:
+            for pos, order, risk in await cur.fetchall():
+                if risk is None:
+                    continue
+                if pos:
+                    out[str(pos)] = float(risk)
+                if order:
+                    out.setdefault(str(order), float(risk))
+    return out
+
+
+async def get_reconciled_position_ids() -> set:
+    """position_ids already recorded in trade_results (dedup for reconciliation)."""
+    ids = set()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT position_id FROM trade_results WHERE position_id IS NOT NULL"
+        ) as cur:
+            for (pid,) in await cur.fetchall():
+                if pid:
+                    ids.add(str(pid))
+    return ids
+
+
+async def save_broker_result(s: dict) -> None:
+    """Write one broker-reconciled outcome into trade_results (source='broker')."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO trade_results
+            (symbol, direction, trade_type, session, result, entry, sl, tp,
+             exit_price, rr_planned, rr_achieved, version, trade_id, timestamp, source, position_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            s.get("symbol", ""), str(s.get("direction", "")).lower(), "", s.get("session", ""),
+            s.get("result", ""), _f(s.get("entry")), 0.0, 0.0, _f(s.get("exit_price")),
+            0.0, _f(s.get("rr_achieved")), "broker", None,
+            s.get("timestamp") or datetime.now().isoformat(), "broker", str(s.get("position_id", "")),
+        ))
+        await db.commit()
+
+
+def _f(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None

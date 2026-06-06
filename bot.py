@@ -450,6 +450,17 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(_stats.format_stats(s), parse_mode="HTML")
 
 
+async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the learning brain: complete recorded outcomes by session/symbol/type/month + learnings."""
+    import brain as _brain
+    try:
+        b = await _brain.get_brain()
+        await update.message.reply_text(_brain.format_brain(b), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"/brain failed: {e}")
+        await update.message.reply_text("⚠️ Brain read failed — try again shortly.")
+
+
 async def cmd_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Claude analyzes the trade history and gives data-backed recommendations (advisory)."""
     s = await _stats.compute_stats()
@@ -704,6 +715,7 @@ async def run_bot_and_webhook():
     bot_app.add_handler(CommandHandler("resume", cmd_resume))
     bot_app.add_handler(CommandHandler("status", cmd_status))
     bot_app.add_handler(CommandHandler("stats", cmd_stats))
+    bot_app.add_handler(CommandHandler("brain", cmd_brain))
     bot_app.add_handler(CommandHandler("review", cmd_review))
     bot_app.add_handler(CommandHandler("brief", cmd_brief))
     bot_app.add_handler(CommandHandler("ask", cmd_ask))

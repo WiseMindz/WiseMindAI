@@ -43,7 +43,7 @@ from config import (
     MAX_LOT_SIZE,
     MAX_RISK_DOLLARS,
 )
-from database import save_trade, save_message
+from database import save_trade, save_message, save_signal, save_execution
 from signal_utils import evaluate_signal
 import mt5_executor
 import daily_limit
@@ -655,6 +655,34 @@ async def receive_webhook(request: Request):
             logger.info("Trade saved to database")
         except Exception as e:
             logger.error(f"Failed to save trade: {e}")
+
+        # ── LEARNING BRAIN: record EVERY signal (fired or skipped + reason) + real fills ──
+        try:
+            er = exec_result or {}
+            fired = er.get("success") is True
+            skip_reason = (
+                "dry_run" if er.get("dry_run") else
+                "paused" if er.get("paused") else
+                "grade<min" if er.get("skipped") else
+                "1m-skip" if er.get("tf_skipped") else
+                "lot>max" if er.get("lot_too_big") else
+                "daily-cap" if er.get("daily_limit") else
+                "max-DD" if er.get("dd_blocked") else
+                "daily-loss" if er.get("loss_blocked") else
+                "exec-error" if er.get("success") is False else ""
+            )
+            await save_signal(data, evaluation, fired, skip_reason, er.get("order_id", ""))
+            if fired and er.get("order_id"):
+                await save_execution(
+                    order_id=str(er.get("order_id", "")), position_id=str(er.get("position_id", "")),
+                    symbol=data["symbol"], direction=str(data["side"]).lower(), lot=lot_calc["lot"],
+                    fill_price=float(er.get("entry_price") or data.get("entry") or 0),
+                    sl=float(data.get("sl") or 0), tp=float(data.get("tp") or 0),
+                    risk_dollars=float(lot_calc.get("risk_dollars") or 0),
+                    session=session, grade=grade, tf=str(data.get("tf_type", data.get("tf", ""))),
+                )
+        except Exception as e:
+            logger.error(f"Brain: failed to record signal/execution: {e}")
 
         msg = format_telegram_message(data, lot_calc, tp_profit, evaluation, exec_result)
 

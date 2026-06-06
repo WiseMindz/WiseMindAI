@@ -63,6 +63,11 @@ MAX_LOT_SIZE    = float(os.getenv("MAX_LOT_SIZE", "5.0"))   # 0 = no cap
 # risk more. Belt-and-suspenders so a wrong balance/risk% can NEVER over-risk the funded account.
 MAX_RISK_DOLLARS = float(os.getenv("MAX_RISK_DOLLARS", "0"))   # 0 = off; set 500 on a $50k account
 
+# ── LEARNING BRAIN: broker-truth reconciliation (read-only deal history → complete record) ──
+RECONCILE_ENABLED      = os.getenv("RECONCILE_ENABLED", "false").lower() == "true"  # OFF until enabled
+RECONCILE_POLL_SECONDS = int(os.getenv("RECONCILE_POLL_SECONDS", "900"))            # 15 min
+RECONCILE_LOOKBACK_HRS = float(os.getenv("RECONCILE_LOOKBACK_HRS", "48"))           # window per pass
+
 # ── Breakeven monitor (replicates Pine "Auto Move SL to Breakeven") ───────────
 # When an open position reaches BE_TRIGGER_R profit, its SL is moved to entry.
 BE_ENABLED      = os.getenv("BE_ENABLED", "true").lower() == "true"
