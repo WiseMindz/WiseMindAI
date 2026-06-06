@@ -298,6 +298,17 @@ user's local MT5 app is **NOT** in the trade path — it's only a viewing window
 
 ## 5. NEXT TASK QUEUE  (do top-first; CONFIRM before editing — see §1)
 
+> **🧠✅ LEARNING BRAIN — BUILT & DEPLOYED 2026-06-06 (commit 2e48df7).** Phase A+B+C foundation shipped:
+> NEW `brain.py` (rolling stats by session/symbol/type/month + recommendations, `/brain` command) + NEW
+> `reconcile.py` (READ-ONLY MetaAPI `get_deals_by_time_range` → every closed position's real outcome/exit/R →
+> `trade_results` source='broker', deduped by position_id). DB: NEW `signals` table (every signal fired/skipped
+> + reason + features) + `executions` table (real fills + risk for R) + `source`/`position_id` cols. Webhook now
+> logs EVERY signal + every fill. Reconcile runs in the monitor loop, **gated `RECONCILE_ENABLED` (default OFF)**
+> — signal/execution logging is always-on (safe, pure DB writes). +9 tests (46 pass). ZERO change to entry/
+> trading logic. **TO ACTIVATE full outcome recording: set Railway `RECONCILE_ENABLED=true`** (then bot-managed
+> exits — 24h/BE — finally land in /stats + /brain). Next: Phase B deeper (feature-level learning via signals↔
+> outcome join) + Phase C auto-tune suggestions; AI strategy-recognition still to discuss.
+>
 > **🧠⭐ BIG VISION — PARKED 2026-06-06 (Michael; revisit, 12h reminder set). Two linked ideas:**
 > **(1) Record EVERYTHING + server-side learning brain** (full brief given 2026-06-06). Pine is STATELESS —
 > a brain CANNOT live inside the indicator (no persistence, can't write/learn between reloads). The brain must
